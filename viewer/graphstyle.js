@@ -1,9 +1,9 @@
 // Cytoscape stylesheet for a theme. Per-node colours (tab icon, accent) live in element data.
 
 export const FONTS = {
-  sans: '"IBM Plex Sans", system-ui, sans-serif',
-  mono: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-  display: '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif',
+  sans: '"Inter", system-ui, sans-serif',
+  mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  display: '"Inter", system-ui, sans-serif',
 };
 
 export function stylesheet(t, { large }) {

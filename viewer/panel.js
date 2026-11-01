@@ -360,12 +360,12 @@ export function renderInsights(app) {
       <div class="card-title">HTTP links <span class="muted">${fmt(http.length)}</span></div>
       <div class="bar">
         <span style="width:${pct(certain)}%;background:var(--ok)"></span>
-        <span style="width:${pct(uncertain)}%;background:var(--accent)"></span>
+        <span style="width:${pct(uncertain)}%;background:var(--warn)"></span>
         <span style="width:${pct(unmatched)}%;background:var(--danger)"></span>
       </div>
       <div class="bar-legend">
         <span><i style="background:var(--ok)"></i>certain ${fmt(certain)}</span>
-        <span><i style="background:var(--accent)"></i>uncertain ${fmt(uncertain)}</span>
+        <span><i style="background:var(--warn)"></i>uncertain ${fmt(uncertain)}</span>
         <span><i style="background:var(--danger)"></i>unmatched ${fmt(unmatched)}</span>
       </div>
     </div>

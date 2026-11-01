@@ -26,11 +26,11 @@ function vendorFiles(): Record<string, string> {
     'elk.bundled.js': require.resolve('elkjs/lib/elk.bundled.js'),
     'cytoscape-elk.js': require.resolve('cytoscape-elk/dist/cytoscape-elk.js'),
   };
-  // /vendor/fonts/<file>.woff2 from the @fontsource packages (latin subset only).
-  for (const pkg of ['ibm-plex-sans', 'ibm-plex-mono', 'space-grotesk']) {
-    const dir = path.join(path.dirname(require.resolve(`@fontsource/${pkg}/package.json`)), 'files');
+  // /vendor/fonts/<file>.woff2: Inter and JetBrains Mono, variable (every weight in one file), latin subset.
+  for (const pkg of ['inter', 'jetbrains-mono']) {
+    const dir = path.join(path.dirname(require.resolve(`@fontsource-variable/${pkg}/package.json`)), 'files');
     for (const f of fs.readdirSync(dir)) {
-      if (/-latin-\d+-normal\.woff2$/.test(f)) files[`fonts/${f}`] = path.join(dir, f);
+      if (/-latin-wght-normal\.woff2$/.test(f)) files[`fonts/${f}`] = path.join(dir, f);
     }
   }
   return files;

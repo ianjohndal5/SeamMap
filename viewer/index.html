@@ -15,10 +15,8 @@
         <rect x="9" y="8.5" width="6" height="7" rx="2" fill="var(--endpoint)"/>
         <rect x="16.5" y="4" width="6" height="16" rx="2" fill="var(--next)"/>
       </svg>
-      <div class="brand-text">
-        <h1 class="brand-name">SeamMap</h1>
-        <span class="brand-sub" id="project-chip"></span>
-      </div>
+      <h1 class="brand-name">SeamMap</h1>
+      <span class="brand-sub" id="project-chip"></span>
     </div>
 
     <div class="search" role="search">
@@ -29,27 +27,36 @@
     </div>
 
     <div class="controls">
-      <div class="seg" data-seg="depth" role="group" aria-label="Focus depth">
-        <span class="seg-label">Focus</span>
-        <button data-value="auto" aria-pressed="true" title="Endpoints: whole chain · others: 1 hop">Auto</button>
-        <button data-value="1" aria-pressed="false" title="Direct neighbours">1</button>
-        <button data-value="2" aria-pressed="false" title="Two hops">2</button>
-        <button data-value="chain" aria-pressed="false" title="Callers and callees, transitively">Chain</button>
-      </div>
-      <div class="seg" data-seg="layout" role="group" aria-label="Layout">
-        <span class="seg-label">Layout</span>
-        <button data-value="auto" aria-pressed="true" title="Flow for small graphs, grouped for large ones">Auto</button>
-        <button data-value="flow" aria-pressed="false" title="ELK layered on every card">Flow</button>
-        <button data-value="grouped" aria-pressed="false" title="Cards packed into role groups">Grouped</button>
-      </div>
-      <button id="btn-isolate" class="btn toggle" aria-pressed="false" title="Show only the focused chain (I)"><i data-icon="target"></i><span>Isolate</span></button>
       <button id="btn-sec" class="btn toggle" aria-pressed="false" title="Security lens: outline endpoints by protection state (S)" hidden><i data-icon="shield"></i><span>Lens</span></button>
-      <span class="sep"></span>
-      <button class="icon-btn" id="btn-collapse" title="Collapse all files"><i data-icon="collapse"></i></button>
-      <button class="icon-btn" id="btn-relayout" title="Run the layout again"><i data-icon="relayout"></i></button>
-      <button class="icon-btn" id="btn-theme" title="Light / dark (T)"><i data-icon="sun"></i></button>
-      <button class="icon-btn" id="btn-help" title="Shortcuts (?)"><i data-icon="help"></i></button>
-      <button class="icon-btn" id="btn-panel" title="Show / hide panel"><i data-icon="sidebar"></i></button>
+      <div class="menu-wrap">
+        <button id="btn-view" class="btn" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu" title="View: focus depth, layout, theme (V)"><i data-icon="sliders"></i><span>View</span><i data-icon="chevronDown" class="chev-down"></i></button>
+        <div class="menu" id="view-menu" role="dialog" aria-label="View options" hidden>
+          <div class="menu-section">
+            <div class="menu-label">Focus depth <span class="menu-hint">what a click highlights</span></div>
+            <div class="seg" data-seg="depth" role="group" aria-label="Focus depth">
+              <button data-value="auto" aria-pressed="true" title="Endpoints: whole chain · others: 1 hop">Auto</button>
+              <button data-value="1" aria-pressed="false" title="Direct neighbours">1 hop</button>
+              <button data-value="2" aria-pressed="false" title="Two hops">2 hops</button>
+              <button data-value="chain" aria-pressed="false" title="Callers and callees, transitively">Chain</button>
+            </div>
+          </div>
+          <div class="menu-section">
+            <div class="menu-label">Layout</div>
+            <div class="seg" data-seg="layout" role="group" aria-label="Layout">
+              <button data-value="auto" aria-pressed="true" title="Flow for small graphs, grouped for large ones">Auto</button>
+              <button data-value="flow" aria-pressed="false" title="ELK layered on every card">Flow</button>
+              <button data-value="grouped" aria-pressed="false" title="Cards packed into role groups">Grouped</button>
+            </div>
+          </div>
+          <div class="menu-section menu-items">
+            <button class="menu-item" id="btn-collapse"><i data-icon="collapse"></i><span>Collapse all files</span></button>
+            <button class="menu-item" id="btn-relayout"><i data-icon="relayout"></i><span>Run the layout again</span></button>
+            <button class="menu-item" id="btn-theme"><i data-icon="sun"></i><span>Light theme</span><kbd>T</kbd></button>
+          </div>
+        </div>
+      </div>
+      <button class="icon-btn" id="btn-help" title="Shortcuts (?)" aria-label="Shortcuts"><i data-icon="help"></i></button>
+      <button class="icon-btn" id="btn-panel" title="Show / hide the panel (P)" aria-label="Show or hide the panel"><i data-icon="sidebar"></i></button>
     </div>
   </header>
 
@@ -57,6 +64,15 @@
     <section class="stage" id="stage">
       <div id="cy"></div>
       <div class="lane-heads" id="lane-heads"></div>
+      <div class="selection-bar" id="selection-bar" role="toolbar" aria-label="Selection" hidden>
+        <span class="sel-icon" id="sel-icon"></span>
+        <span class="sel-name" id="sel-name"></span>
+        <span class="sel-sep" aria-hidden="true"></span>
+        <button class="sel-btn" id="btn-isolate" aria-pressed="false" title="Show only this chain (I)"><i data-icon="target"></i><span>Isolate</span></button>
+        <button class="sel-btn" id="btn-expand" title="Open the file into classes and methods (E)" hidden><i data-icon="expand"></i><span>Expand</span></button>
+        <button class="sel-btn" id="btn-open" title="Open the file at this line (O)"><i data-icon="external"></i><span>Open</span></button>
+        <button class="sel-btn icon" id="btn-clear" title="Clear the selection (Esc)" aria-label="Clear the selection"><i data-icon="close"></i></button>
+      </div>
       <div class="legend-bar" id="legend-bar" role="group" aria-label="Edge kinds"></div>
       <div class="nav-dock">
         <div class="zoom-bar">
@@ -103,6 +119,7 @@
       <div><span class="keys"><kbd>+</kbd> <kbd>−</kbd></span><span>Zoom in / out</span></div>
       <div><span class="keys"><kbd>E</kbd></span><span>Expand / collapse the selected file</span></div>
       <div><span class="keys"><kbd>O</kbd></span><span>Open the selection in VS Code</span></div>
+      <div><span class="keys"><kbd>V</kbd></span><span>View options: focus depth, layout, theme</span></div>
       <div><span class="keys"><kbd>T</kbd></span><span>Light / dark theme</span></div>
       <div><span class="keys"><kbd>P</kbd></span><span>Show / hide the panel</span></div>
       <div id="help-sec" hidden><span class="keys"><kbd>S</kbd></span><span>Security lens on / off (graphs built with --security)</span></div>

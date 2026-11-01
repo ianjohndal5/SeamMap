@@ -25,8 +25,16 @@ with **Breaking:**.
 
 - Frameworks plug in through one registry (`src/frameworks.ts`): detection, the pipeline and the link stage no
   longer name Laravel or Next.js. Output is unchanged.
-- Viewer: text colours meet WCAG AA contrast in both themes; the panel's tabs shrink to icons when they don't fit;
-  narrow windows start with the panel closed; larger GET/POST badges on endpoint cards.
+- Viewer redesign: neutral grey chrome (black and white buttons) so the map's colours stand out; Inter and
+  JetBrains Mono (two variable font files instead of eight); segmented panel tabs; glass docks on the canvas.
+  Text meets WCAG AA contrast in both themes; the panel's tabs shrink to icons when they don't fit; narrow windows
+  start with the panel closed.
+- Viewer top bar: 14 controls down to 5. Focus depth, layout, collapse all, re-layout and the theme move into a
+  **View** menu (`V`), reachable at every window width (narrow windows used to hide some of them). **Isolate**,
+  **Expand** and **Open** move to a selection bar shown over the map when a card is selected (and stay in the panel
+  and on `I`, `E`, `O`). The isolation toast is gone: the selection bar and the status bar show it.
+- HTTP-method badges on cards are drawn in the system sans-serif, crisp on every OS (they were a generic
+  monospace, Courier on Windows).
 - Config files: an unknown key is a warning with the closest known key; a file or section of the wrong type, or an
   `include` pattern outside the project, is an error that names the file and the key.
 - Monorepo detection counts a folder as a Next.js app only with `next` as a dependency and `app/`, `pages/` or a

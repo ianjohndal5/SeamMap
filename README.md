@@ -107,18 +107,18 @@ seammap <monorepoRoot> [options]
 | --- | --- |
 | Focus a node (highlight neighbours, fade the rest) | click |
 | Clear the focus, leave isolation | click the background, or `Esc` |
-| Focus depth | **Focus** in the top bar: `Auto` (endpoints → whole chain, others → 1 hop), `1`, `2`, `Chain` |
-| Show only the focused chain, laid out on its own | **Isolate**, or `I` (toggle) |
-| Expand or collapse a file into its classes, functions and methods | double-click the file, `E`, or **Expand** in the panel |
-| Open in VS Code (`vscode://file/<abs-path>:<line>`) | right-click any node, double-click a function/method/endpoint, `O`, or **Open in VS Code** in the panel |
+| Focus depth | **View** menu (`V`): `Auto` (endpoints → whole chain, others → 1 hop), `1 hop`, `2 hops`, `Chain` |
+| Show only the focused chain, laid out on its own | **Isolate** on the selection bar (it appears over the map when a card is selected) or in the panel, or `I` (toggle) |
+| Expand or collapse a file into its classes, functions and methods | double-click the file, `E`, or **Expand** on the selection bar or in the panel |
+| Open in VS Code (`vscode://file/<abs-path>:<line>`) | right-click any node, double-click a function/method/endpoint, `O`, or **Open** on the selection bar / **Open in VS Code** in the panel |
 | Search by name, path or URL | `/` focuses the search; a concrete URL such as `/api/v1/users/42` finds the matching route pattern; `↑ ↓ ↵` to pick |
 | Zoom and navigate | scroll and drag; the zoom bar (`−` `+`, the % resets to 100%, fit); `+` `−` `F` keys; the minimap (drag to pan) |
 | Jump to a column | click a lane header (Laravel / Endpoints / Next.js) |
 | Show or hide edge kinds | the legend at the bottom left (it is also the toggle), or the **Filters** tab |
 | Hide groups (roles, Next.js kinds) | **Filters** tab (per group, or all/none per lane) |
 | Inspect an edge (each underlying call site, with links to its line) | click the edge |
-| Layout | **Layout** in the top bar: `Auto` / `Flow` / `Grouped` (see [Viewer](#viewer)) |
-| Theme, panel, help | `T` light/dark, `P` show/hide the panel, `?` shortcuts |
+| Layout | **View** menu: `Auto` / `Flow` / `Grouped` (see [Viewer](#viewer)); **Collapse all files** and **Run the layout again** are there too |
+| Theme, panel, help | `T` or the **View** menu for light/dark, `P` or the panel button, `?` or the help button |
 | Security lens outlines (graphs built with `--security`) | **Lens** in the top bar, or `S` |
 
 The side panel has three tabs (four with `--security`):
@@ -345,15 +345,17 @@ The output is flat and close to the brief's format, with a few extra fields:
 Plain HTML + JavaScript ES modules (`viewer/`, no build step) using Cytoscape.js 3.33 and cytoscape-elk (ELK layered), served by Node's `http` module. Vendor scripts and fonts come from `node_modules`, so it works offline.
 
 **Design.**
-* **Themes.** A dark "ink" theme and a warm light "paper" theme. The first visit follows the OS preference, and `T` toggles.
-* **Colours.** The three sides each have a colour: Laravel red, endpoints amber (the UI accent, the bridge between the two stacks), Next.js blue.
+* **Themes.** Dark and light, both neutral grey: the first visit follows the OS preference, and `T` (or the View menu) toggles.
+* **Colours.** The chrome has no colour of its own (black and white buttons, grey surfaces), so the map's colours are the only strong ones: Laravel red, endpoints amber, Next.js blue, the HTTP methods and the security states. Warnings (unmatched calls, things to review) are amber.
+* **Top bar.** Brand and project, search, and four buttons: **Lens** (with `--security`), **View** (focus depth, layout, collapse all, re-layout, theme), help, and the panel. Everything is reachable at every window width.
+* **Selection bar.** Selecting a card shows its name over the map with what it can do: **Isolate**, **Expand** (files), **Open**, and clear.
 * **Lanes.** Tinted lanes sit behind the three columns. Their headers stay pinned to the top of the canvas while you pan and show counts. The dot grid moves and scales with the canvas.
 * **Cards.** Each card has a coloured left tab with a role icon (controller, model, service, page, component, hook, API client, …), or for endpoints an HTTP-method badge (GET green, POST blue, PUT/PATCH amber, DELETE red), and a short label: class name, route path or file name. The full path is in the tooltip and the panel.
-* **Fonts.** IBM Plex Sans for UI and labels, IBM Plex Mono for paths and routes, Space Grotesk for display text.
+* **Fonts.** Inter for UI and labels, JetBrains Mono for paths and routes (variable fonts, one file each, bundled). The HTTP-method badges on cards are drawn in the system's sans-serif: they are images, which can't use web fonts.
 * **Readable on first load.** Small graphs open at no less than 68% zoom (14px card text), centred. Large graphs, where fitting everything would leave nothing readable, open fitted to the width of the lanes, top-aligned so the group titles read, with the suggested start scrolled into view and haloed until the first click. Whatever is off-screen is one `F` (fit everything) or minimap drag away. Lane headers never clip their titles; when the lanes are narrow they move apart instead.
 * **Accessible.** Text meets WCAG AA contrast (4.5:1) in both themes, every control has a visible keyboard focus and a name, and the side panel's tabs shrink to icons (names in their tooltips) when they don't fit. Narrow windows start with the panel closed (`P` opens it).
 * **Empty and broken states.** A graph with nothing in it says what was scanned and what to check; a `graph.json` of another format version says which version wrote it (see [Versioning](#versioning)).
-* **Feedback.** Hover tooltips, toasts (isolation, copy, opening VS Code) and a one-time tip on first visit.
+* **Feedback.** Hover tooltips, toasts (copy, opening VS Code) and a one-time tip on first visit; isolation shows on the selection bar and in the status bar.
 
 **Layout modes.**
 * **Flow mode** (default up to 350 visible cards / 1,500 edges). ELK layered runs on the real cards with direction `LEFT`. ELK *partitions* give every role its own **band**, ordered: models | services, requests, jobs, … | controllers, route files, middleware ‖ endpoints ‖ API clients, hooks | components, route handlers | pages, layouts. That needs `separateConnectedComponents: false`; with component separation on, ELK lets the columns overlap. Only edges *between* bands steer the layout, so each band stays one straight column (`LINEAR_SEGMENTS` placement), and gutters separate the three lanes. Expanded files are compound nodes (file > class > methods) laid out with `INCLUDE_CHILDREN`.

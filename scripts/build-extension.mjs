@@ -54,9 +54,9 @@ const vendor = {
   'cytoscape-elk.js': require.resolve('cytoscape-elk/dist/cytoscape-elk.js'),
 };
 for (const [name, file] of Object.entries(vendor)) fs.copyFileSync(file, path.join(viewer, 'vendor', name));
-for (const font of ['ibm-plex-sans', 'ibm-plex-mono', 'space-grotesk']) {
-  const dir = path.join(path.dirname(require.resolve(`@fontsource/${font}/package.json`)), 'files');
-  for (const f of fs.readdirSync(dir)) if (/-latin-\d+-normal\.woff2$/.test(f)) fs.copyFileSync(path.join(dir, f), path.join(viewer, 'vendor', 'fonts', f));
+for (const font of ['inter', 'jetbrains-mono']) {
+  const dir = path.join(path.dirname(require.resolve(`@fontsource-variable/${font}/package.json`)), 'files');
+  for (const f of fs.readdirSync(dir)) if (/-latin-wght-normal\.woff2$/.test(f)) fs.copyFileSync(path.join(dir, f), path.join(viewer, 'vendor', 'fonts', f));
 }
 
 // The grammars' .wasm files, from the same grammar packages (and versions) as the native parsers.
@@ -127,7 +127,7 @@ function productionDependencies(dir) {
 // Not require.resolve: some packages (cytoscape) don't export their package.json.
 const fromRoot = (name) => path.join(root, 'node_modules', ...name.split('/'));
 const bundled = [
-  ...['cytoscape', 'cytoscape-elk', 'elkjs', '@fontsource/ibm-plex-sans', '@fontsource/ibm-plex-mono', '@fontsource/space-grotesk'].map((n) => [fromRoot(n), 'the viewer']),
+  ...['cytoscape', 'cytoscape-elk', 'elkjs', '@fontsource-variable/inter', '@fontsource-variable/jetbrains-mono'].map((n) => [fromRoot(n), 'the viewer']),
   ...['tree-sitter-php', 'tree-sitter-typescript', 'tree-sitter-javascript'].map((n) => [fromRoot(n), 'the grammars (.wasm)']),
   ...productionDependencies(ext).map((d) => [d, 'the analyzer (runtime dependency)']),
 ];

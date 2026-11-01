@@ -103,8 +103,8 @@ export class Minimap {
     const { x1, y1, s, ox, oy } = this.map;
     const rx = ox + (ext.x1 - x1) * s;
     const ry = oy + (ext.y1 - y1) * s;
-    ctx.fillStyle = this.theme.accent + '22';
-    ctx.strokeStyle = this.theme.accent;
+    ctx.fillStyle = this.theme.select + '1a';
+    ctx.strokeStyle = this.theme.select;
     ctx.lineWidth = 1.5;
     ctx.fillRect(rx, ry, ext.w * s, ext.h * s);
     ctx.strokeRect(rx, ry, ext.w * s, ext.h * s);

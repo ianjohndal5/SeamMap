@@ -40,6 +40,8 @@ const P = {
   moon: '<path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5 5.8 5.8 0 1 0 13.5 9.6Z"/>',
   help: '<circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1"/>',
   sidebar: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/>',
+  sliders: '<path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/>',
+  chevronDown: '<path d="m4.5 6.5 3.5 3.5 3.5-3.5"/>',
   external: '<path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3c0 .6-.4 1-1 1H3.5c-.6 0-1-.4-1-1V5c0-.6.4-1 1-1h3"/>',
   copy: '<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>',
   expand: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><path d="M8 5.5v5M5.5 8h5"/>',
@@ -96,12 +98,13 @@ export function methodTab(text, color, h, dashed = false) {
   const key = `m|${text}|${color}|${h}|${dashed}`;
   let u = cache.get(key);
   if (!u) {
+    // SVG images can't use the page's web fonts, so the badge uses a system sans (a generic monospace can be Courier).
     const size = text.length > 5 ? 11 : 12.5;
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${BADGE_W}" height="${h}" viewBox="0 0 ${BADGE_W} ${h}">` +
       `<rect width="${BADGE_W}" height="${h}" fill="${hexToRgba(color, dashed ? 0.08 : 0.15)}"/>` +
       `<rect width="3" height="${h}" fill="${color}"${dashed ? ' fill-opacity="0.6"' : ''}/>` +
-      `<text x="${(BADGE_W + 3) / 2}" y="${h / 2 + size * 0.36}" text-anchor="middle" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="${size}" letter-spacing="0.4" fill="${color}">${text}</text>` +
+      `<text x="${(BADGE_W + 3) / 2}" y="${h / 2 + size * 0.36}" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, DejaVu Sans, sans-serif" font-weight="700" font-size="${size}" letter-spacing="0.6" fill="${color}">${text}</text>` +
       `</svg>`;
     u = uri(svg);
     cache.set(key, u);

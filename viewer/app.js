@@ -255,7 +255,49 @@ class App {
   }
 
   updateThemeButton() {
-    $('#btn-theme').innerHTML = icon(this.theme.name === 'dark' ? 'sun' : 'moon');
+    const dark = this.theme.name === 'dark';
+    $('#btn-theme').innerHTML = `${icon(dark ? 'sun' : 'moon')}<span>${dark ? 'Light' : 'Dark'} theme</span><kbd>T</kbd>`;
+  }
+
+  /** The View menu (focus depth, layout, collapse, re-layout, theme): a popover under its button. */
+  toggleViewMenu(open = $('#view-menu').hidden) {
+    $('#view-menu').hidden = !open;
+    $('#btn-view').setAttribute('aria-expanded', String(open));
+    if (open) $('#view-menu').querySelector('.seg button[aria-pressed="true"]')?.focus();
+  }
+
+  /**
+   * The selection bar at the top of the canvas: the selected card's name and what it can do (isolate its chain,
+   * expand its file, open it in the editor, clear). Hidden without a selection.
+   */
+  updateSelectionBar() {
+    const bar = $('#selection-bar');
+    const id = this.state.selected;
+    const n = id && !this.state.selectedEdge ? this.M.byId.get(id) : null;
+    if (!n) {
+      bar.hidden = true;
+      return;
+    }
+    const top = this.M.byId.get(this.M.topOf.get(id)) ?? n;
+    const isEndpoint = n.kind === 'endpoint' || n.kind === 'unmatched';
+    $('#sel-icon').style.setProperty('--c', this.theme.groups[groupKey(top)] ?? this.theme.muted);
+    $('#sel-icon').innerHTML = icon(iconOf(n, GROUPS[groupKey(top)]?.icon), 13);
+    const name = $('#sel-name');
+    name.textContent = isEndpoint ? `${n.method ?? ''} ${n.path ?? n.name ?? ''}`.trim() : displayName(this.M, id);
+    name.classList.toggle('mono', isEndpoint);
+    name.title = name.textContent;
+    const isolate = $('#btn-isolate');
+    isolate.querySelector('span').textContent = this.state.isolated ? 'Isolated' : 'Isolate';
+    isolate.title = this.state.isolated ? 'Show the whole map again (I or Esc)' : 'Show only this chain (I)';
+    const canExpand = (this.M.children.get(id) || []).length > 0;
+    const expand = $('#btn-expand');
+    expand.hidden = !canExpand;
+    if (canExpand) {
+      const open = this.state.expanded.has(id);
+      expand.innerHTML = `${icon(open ? 'collapse' : 'expand')}<span>${open ? 'Collapse' : 'Expand'}</span>`;
+    }
+    $('#btn-open').hidden = !editorUrl(n, this.meta);
+    bar.hidden = false;
   }
 
   /** `remember`: false when following the editor's theme (VS Code decides, nothing to store). */
@@ -957,7 +999,6 @@ class App {
       this.state.isolated = false;
       this.routeEdges();
       this.addLanes();
-      this.dismissToast('isolate');
     }
     if (on) {
       this.savedPositions = new Map(cy.nodes().filter((n) => !n.isParent() && !n.hasClass('lane')).map((n) => [n.id(), { ...n.position() }]));
@@ -973,7 +1014,6 @@ class App {
       }
       this.routeEdges({ widen: true });
       this.addLanes();
-      this.toast({ id: 'isolate', icon: 'target', text: `Isolated chain · ${kept.nodes().not(':parent').length} cards`, actions: [{ label: 'Exit', run: () => this.isolate(false) }] });
     }
     $('#btn-isolate').setAttribute('aria-pressed', String(this.state.isolated));
     this.fitAll(true);
@@ -1112,6 +1152,7 @@ class App {
 
   renderPanel() {
     const { state } = this;
+    this.updateSelectionBar();
     let html;
     if (state.tab === 'insights') html = renderInsights(this);
     else if (state.tab === 'security') html = renderSecurity(this);
@@ -1341,12 +1382,31 @@ class App {
       });
     }
     $('#btn-isolate').addEventListener('click', () => this.isolate(!this.state.isolated));
+    $('#btn-expand').addEventListener('click', () => this.state.selected && this.toggleExpand(this.state.selected));
+    $('#btn-open').addEventListener('click', () => this.state.selected && this.openInEditor(this.state.selected));
+    $('#btn-clear').addEventListener('click', () => this.reset());
+    $('#btn-view').addEventListener('click', () => this.toggleViewMenu());
+    // Outside the menu (and not its button): close it.
+    document.addEventListener('pointerdown', (e) => {
+      if (!$('#view-menu').hidden && !e.target.closest('.menu-wrap')) this.toggleViewMenu(false);
+    });
+    $('#view-menu').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        this.toggleViewMenu(false);
+        $('#btn-view').focus();
+      }
+    });
     $('#btn-sec').addEventListener('click', () => this.setSecLens(!this.state.secLens));
     $('#btn-collapse').addEventListener('click', () => {
+      this.toggleViewMenu(false);
       this.state.expanded.clear();
       this.render();
     });
-    $('#btn-relayout').addEventListener('click', () => this.render());
+    $('#btn-relayout').addEventListener('click', () => {
+      this.toggleViewMenu(false);
+      this.render();
+    });
     $('#btn-theme').addEventListener('click', () => this.applyTheme(this.theme.name === 'dark' ? 'light' : 'dark'));
     $('#btn-help').addEventListener('click', () => $('#help-dialog').showModal());
     $('#btn-panel').addEventListener('click', () => this.togglePanel());
@@ -1480,7 +1540,9 @@ class App {
     document.addEventListener('keydown', (e) => {
       if (e.target === input || e.target.closest?.('dialog') || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key;
-      if (k === 'Escape') this.reset();
+      if (k === 'Escape' && !$('#view-menu').hidden) this.toggleViewMenu(false);
+      else if (k === 'Escape') this.reset();
+      else if (k === 'v' || k === 'V') this.toggleViewMenu();
       else if (k === '/') {
         e.preventDefault();
         input.focus();
@@ -1525,7 +1587,7 @@ async function main() {
   const panelPref = store.get('seammap.panel');
   if (panelPref === 'collapsed' || (!panelPref && matchMedia('(max-width: 820px)').matches)) document.body.classList.add('panel-collapsed');
   // Canvas labels need the web fonts before the first draw (Cytoscape caches label bitmaps).
-  const fonts = ['500 13px "IBM Plex Sans"', '400 12px "IBM Plex Sans"', '500 12px "IBM Plex Mono"', '700 16px "Space Grotesk"'].map((f) => document.fonts.load(f));
+  const fonts = ['500 13px "Inter"', '400 12px "Inter"', '650 16px "Inter"', '500 12px "JetBrains Mono"'].map((f) => document.fonts.load(f));
   await Promise.race([Promise.all(fonts), new Promise((r) => setTimeout(r, 2500))]);
   let graph;
   try {

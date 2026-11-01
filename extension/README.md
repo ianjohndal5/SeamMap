@@ -14,7 +14,7 @@ anything anywhere.
 3. The analysis runs in the background with progress in a notification (large projects take 10 to 20 seconds),
    then the map opens in an editor tab.
 
-On the map: click a card to focus it and its neighbours, **Isolate** (`I`) to lay out only that chain, `/` to
+On the map: click a card to focus it and its neighbours, **Isolate** on the selection bar (or `I`) to lay out only that chain, `/` to
 search by name, path or a URL like `/api/users/42`, and double-click a function, method or endpoint (or use
 **Open file** in the side panel) to open it beside the map. `?` lists every shortcut.
 
@@ -81,6 +81,6 @@ its parsers are WebAssembly, so the same package works on every platform and arc
 
 ## Third-party software
 
-The extension bundles Cytoscape.js and cytoscape-elk (MIT), ELK (EPL-2.0), the IBM Plex and Space Grotesk fonts
+The extension bundles Cytoscape.js and cytoscape-elk (MIT), ELK (EPL-2.0), the Inter and JetBrains Mono fonts
 (SIL OFL 1.1), web-tree-sitter and the Tree-sitter grammars (MIT), and the analyzer's dependencies; see
 `THIRD_PARTY_NOTICES.md`.
