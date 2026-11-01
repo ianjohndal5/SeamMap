@@ -222,6 +222,16 @@ kbd {
 .menu-item:hover { background: var(--surface-3); }
 .menu-item .ico { color: var(--muted); }
 .menu-item span { flex: 1; }
+.menu-item .switch {
+  position: relative; flex: none; width: 28px; height: 16px; border-radius: 99px;
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border-strong); transition: background 0.15s;
+}
+.menu-item .switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--muted); transition: transform 0.15s var(--ease), background 0.15s;
+}
+.menu-item[aria-checked='true'] .switch { background: var(--primary); box-shadow: none; }
+.menu-item[aria-checked='true'] .switch::after { transform: translateX(12px); background: var(--primary-ink); }
 @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
 
 /* ---------------------------------------------------------------- workspace */
@@ -333,6 +343,14 @@ body.panel-collapsed .panel { visibility: hidden; }
 .tip-title { font-weight: 600; word-break: break-all; }
 .tip-kind { margin: 6px 0 2px; font-size: 11.5px; color: var(--muted); }
 .tip-loc { display: block; font-size: 11.5px; color: var(--muted); word-break: break-all; }
+.tip-rows { display: grid; gap: 3px; margin-top: 8px; font-size: 12px; }
+.tip-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); }
+.tip-row > span:first-child { display: flex; align-items: center; gap: 8px; }
+.tip-row .mono { color: var(--text); }
+.tip-pairs { display: grid; gap: 3px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); font-size: 11.5px; }
+.tip-pair { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.tip-pair > span:not(.muted) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tip-pair .mono { margin-left: auto; flex: none; }
 .tip-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); font-size: 11px; color: var(--faint); }
 
 .toasts { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 10; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }

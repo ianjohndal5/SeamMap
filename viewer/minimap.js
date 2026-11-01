@@ -54,7 +54,7 @@ export class Minimap {
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     // Class checks, not n.style(): style lookups on thousands of nodes are slow.
-    const visible = this.cy.nodes().filter((n) => !n.hasClass('isolated-out') && !n.isParent() && !n.hasClass('lane') && !n.hasClass('group'));
+    const visible = this.cy.nodes().filter((n) => !n.hasClass('isolated-out') && !n.isParent() && !n.hasClass('lane') && !n.hasClass('group') && !n.hasClass('bubble'));
     const lanes = this.cy.nodes('.lane');
     const all = visible.union(lanes);
     if (all.empty()) {

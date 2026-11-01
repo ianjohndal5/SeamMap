@@ -20,6 +20,12 @@ with **Breaking:**.
 - `loadConfig()` returns `warnings` (unknown keys), and `resolveRoots()` takes an optional `origin` for its error
   messages. `FrameworkId` and `FrameworkInfo` types.
 - `docs/ARCHITECTURE.md`: how the pipeline works and how to add a framework.
+- Viewer: clusters when zoomed out on large maps. Below about 40% zoom, each role group becomes one bubble with its
+  card count, and one line per pair of groups replaces the edges between their cards. Hover a bubble or a line for
+  details (counts by edge kind, uncertain links, the busiest pairs of cards); click to zoom in. A focused chain
+  stays visible as cards. Large maps open fitted whole this way, with the suggested start's group haloed.
+  **View** menu → **Group cards when zoomed out** turns it off. Panning the whole map is about 4–6× less work,
+  and its slowest frames went from 0.87 s to 17 ms on a 6,564-card map.
 
 ### Changed
 

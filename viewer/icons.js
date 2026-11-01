@@ -42,6 +42,7 @@ const P = {
   sidebar: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/>',
   sliders: '<path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/>',
   chevronDown: '<path d="m4.5 6.5 3.5 3.5 3.5-3.5"/>',
+  cluster: '<circle cx="8" cy="8" r="2.6"/><circle cx="3.2" cy="3.6" r="1.3"/><circle cx="12.8" cy="3.6" r="1.3"/><circle cx="3.2" cy="12.4" r="1.3"/><circle cx="12.8" cy="12.4" r="1.3"/>',
   external: '<path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3c0 .6-.4 1-1 1H3.5c-.6 0-1-.4-1-1V5c0-.6.4-1 1-1h3"/>',
   copy: '<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>',
   expand: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><path d="M8 5.5v5M5.5 8h5"/>',

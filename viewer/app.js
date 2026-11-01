@@ -6,7 +6,7 @@ import { cardTab, icon, methodTab } from './icons.js';
 import { stylesheet } from './graphstyle.js';
 import { Minimap } from './minimap.js';
 import { buildModel, descendants, displayName, editorUrl, groupKey, iconOf, labelOf, search, sizeOf } from './model.js';
-import { esc, methodPill, renderFilters, renderInsights, renderInspectEdge, renderInspectEmpty, renderInspectNode, renderSecurity, suggestedStart, tooltipHtml } from './panel.js';
+import { clusterEdgeTooltipHtml, clusterTooltipHtml, esc, methodPill, renderFilters, renderInsights, renderInspectEdge, renderInspectEmpty, renderInspectNode, renderSecurity, suggestedStart, tooltipHtml } from './panel.js';
 import { computeRoutes, routeStyle } from './route.js';
 import { checkSchema } from './schema.js'; // served from dist/schema.js (src/schema.ts), shared with the API
 import { editorTheme, graphUrl, inWebview, onEditorTheme, onHostMessage, openLink, postToHost, store, testMode } from './host.js';
@@ -33,6 +33,12 @@ const LANE_GUTTER = 44;
 const READABLE_ZOOM = 0.68;
 /** Below this zoom a whole-map fit shows nothing readable: large maps open fitted to the lanes' width instead. */
 const OVERVIEW_BELOW = 0.25;
+/**
+ * Clusters (grouped layouts): zoomed out below `enter`, each role group stands for its cards and one line per pair of
+ * groups for all the edges between them; above `leave` the cards come back. Card labels are unreadable below about
+ * 0.5 anyway, and drawing tens of thousands of edges at that scale is what made navigating slow.
+ */
+const CLUSTER_ZOOM = { enter: 0.38, leave: 0.44 };
 /** Screen space kept free around a fitted graph (lane headers on top, docks below). */
 const FIT_PAD = { top: 64, bottom: 72, x: 36 };
 
@@ -103,6 +109,8 @@ class App {
       // Security lens (graph.json from --security): outline endpoint cards by protection state.
       secLens: false,
       secFilter: null,
+      // Group cards into clusters when zoomed out (grouped layouts).
+      clusters: store.get('seammap.clusters') !== 'off',
     };
     // Endpoints and server actions by node id.
     this.sec = graph.security ? new Map([...graph.security.endpoints, ...(graph.security.actions ?? [])].map((e) => [e.id, e])) : null;
@@ -309,7 +317,7 @@ class App {
     this.cy.batch(() => {
       this.cy.nodes().forEach((n) => {
         if (n.hasClass('lane')) n.data('accent', this.theme.lanes[n.data('lane')]);
-        else if (n.hasClass('group')) n.data('accent', this.theme.groups[n.data('group')]);
+        else if (n.hasClass('group') || n.hasClass('bubble')) n.data('accent', this.theme.groups[n.data('group')]);
         else {
           const m = this.M.byId.get(n.id());
           if (m) n.data(nodeVisual(m, this.M.byId.get(this.M.topOf.get(m.id)), this.theme, this.large));
@@ -431,6 +439,7 @@ class App {
     cy.elements().remove();
     cy.add(els);
     cy.endBatch();
+    this.clustered = false;
     if (mode === 'flow') {
       try {
         await this.flowLayout();
@@ -462,7 +471,7 @@ class App {
    */
   renderEdges(toggle = null) {
     const cy = this.cy;
-    const visible = new Set(cy.nodes().not('.group, .lane').map((n) => n.id()));
+    const visible = new Set(cy.nodes().not('.group, .lane, .bubble').map((n) => n.id()));
     if (toggle) {
       const kinds = new Set(Object.keys(TOGGLE_OF).filter((k) => TOGGLE_OF[k] === toggle));
       if (this.state.kinds[toggle]) {
@@ -482,6 +491,7 @@ class App {
       });
     }
     this.routeEdges();
+    if (this.clustered) this.setClustered(true);
     this.reapplySelection();
     this.updateStatus();
   }
@@ -557,7 +567,9 @@ class App {
     const cy = this.cy;
     const nodes = cy.nodes().not('.group, .lane, .isolated-out').length;
     const edges = cy.edges().not('.isolated-out').length;
-    $('#status-left').textContent = `${nodes.toLocaleString()} cards · ${edges.toLocaleString()} edges · ${this.lastLayout.mode} layout ${this.lastLayout.ms} ms${this.state.isolated ? ' · isolated' : ''}`;
+    $('#status-left').textContent = this.clustered
+      ? `${cy.nodes('.bubble').length} groups · ${cy.edges('.cluster-edge').length} lines between them, for ${cy.nodes('.top').length.toLocaleString()} cards · zoom in for cards`
+      : `${nodes.toLocaleString()} cards · ${edges.toLocaleString()} edges · ${this.lastLayout.mode} layout ${this.lastLayout.ms} ms${this.state.isolated ? ' · isolated' : ''}`;
     $('#status-right').textContent = `${this.meta.stats.files.toLocaleString()} files analyzed in ${this.meta.durationMs.toLocaleString()} ms · ${new Date(this.meta.generatedAt).toLocaleString()}`;
   }
 
@@ -868,19 +880,26 @@ class App {
     this.fitAll(false, true);
     const lanes = cy.nodes('.lane');
     if (this.lastLayout.mode === 'flow' || lanes.empty() || cy.zoom() >= OVERVIEW_BELOW) return;
+    const start = this.hinted ? null : suggestedStart(this);
+    const node = start?.id ? cy.getElementById(start.id) : cy.collection();
+    if (node.nonempty()) {
+      this.hinted = true;
+      node.addClass('start-hint');
+      cy.one('tap', () => {
+        node.removeClass('start-hint');
+        cy.nodes('.cluster-hint').removeClass('cluster-hint');
+      });
+    }
+    // Clustered, the whole map reads: keep the fit (the start's group bubble carries the halo).
+    if (this.clusterWanted()) return;
     const bb = lanes.boundingBox({ includeLabels: false });
     const W = cy.width();
     const H = cy.height();
     const z = clamp((W - FIT_PAD.x * 2) / bb.w, cy.zoom(), 1.25);
     const pan = { x: (W - bb.w * z) / 2 - bb.x1 * z, y: FIT_PAD.top - bb.y1 * z };
-    const start = this.hinted ? null : suggestedStart(this);
-    const node = start?.id ? cy.getElementById(start.id) : null;
-    if (node?.nonempty()) {
-      this.hinted = true;
+    if (node.nonempty()) {
       const y = node.position('y') * z + pan.y;
       if (y > H - FIT_PAD.bottom - 60) pan.y = H / 2 - node.position('y') * z;
-      node.addClass('start-hint');
-      cy.one('tap', () => node.removeClass('start-hint'));
     }
     cy.viewport({ zoom: z, pan });
   }
@@ -905,6 +924,7 @@ class App {
   /** Dot grid, zoom level and lane headers follow the viewport. */
   updateOverlays() {
     const cy = this.cy;
+    this.updateClusters();
     const z = cy.zoom();
     const pan = cy.pan();
     const stage = $('#stage');
@@ -976,11 +996,164 @@ class App {
       }
       const nodes = eles.nodes();
       kept = nodes.union(nodes.ancestors()).union(eles.edges());
-      cy.elements().not(kept).not('.lane, .group').addClass('faded');
+      cy.elements().not(kept).not('.lane, .group, .bubble, .cluster-edge').addClass('faded');
       eles.edges().addClass('hl');
       node.addClass('focus');
     });
+    if (this.clustered) this.refreshClusterFocus();
     return kept;
+  }
+
+  // --- clusters (zoomed-out grouped layouts) --------------------------------------------
+
+  /** Should the map be clustered now? Large grouped layouts, zoomed out, not isolated, not switched off. */
+  clusterWanted() {
+    if (!this.state.clusters || !this.large || this.state.isolated || this.lastLayout.mode !== 'grouped') return false;
+    const z = this.cy.zoom();
+    return this.clustered ? z < CLUSTER_ZOOM.leave : z < CLUSTER_ZOOM.enter;
+  }
+
+  /** Called on every viewport change (once per frame): switch between clusters and cards when the zoom crosses over. */
+  updateClusters() {
+    const want = this.clusterWanted();
+    if (want !== Boolean(this.clustered)) this.setClustered(want);
+    else if (want) this.scaleClusters();
+  }
+
+  /**
+   * Clusters on: the cards hide (their edges go with them) and each role group shows one bubble at its centre,
+   * with its card count, and one line per pair of groups. The group boxes and lanes stay, as the map's outline.
+   */
+  setClustered(on) {
+    const cy = this.cy;
+    this.clustered = on;
+    this.clusterZoom = 0;
+    cy.batch(() => {
+      cy.remove('.bubble, .cluster-edge');
+      if (!on) {
+        cy.elements('.clustered, .cl-chain').removeClass('clustered cl-chain');
+        return;
+      }
+      cy.add([...this.clusterBubbles(), ...this.clusterEdges()]);
+    });
+    if (on) {
+      this.scaleClusters();
+      this.refreshClusterFocus();
+    }
+    this.hideTooltip();
+    this.updateStatus();
+  }
+
+  /** One bubble per role group, at the centre of its box. */
+  clusterBubbles() {
+    const counts = new Map();
+    for (const n of this.cy.nodes('.top')) counts.set(n.data('group'), (counts.get(n.data('group')) ?? 0) + 1);
+    const hint = this.cy.nodes('.start-hint').not('.group').data('group');
+    return this.cy.nodes('.group').map((box) => {
+      const g = box.data('group');
+      const count = counts.get(g) ?? 0;
+      const { w, h } = box.boundingBox({ includeLabels: false, includeOverlays: false, includeUnderlays: false, includeOutlines: false });
+      return {
+        group: 'nodes',
+        // px: diameter on screen, in pixels (scaleClusters turns it into graph units for the current zoom, never
+        // wider than the group's box); max: the box's smaller side.
+        data: { id: 'bubble:' + g, group: g, accent: box.data('accent'), count, label: count.toLocaleString(), px: 24 + 5.5 * Math.log2(count + 1), max: Math.min(w, h) * 0.9, d: 10, bfs: 10, bw: 1, hp: 8 },
+        position: { ...box.position() },
+        classes: g === hint ? 'bubble cluster-hint' : 'bubble',
+        selectable: false,
+        grabbable: false,
+      };
+    });
+  }
+
+  /** One edge per pair of groups (both directions apart), carrying the counts of the card edges it stands for. */
+  clusterEdges() {
+    const groupOf = new Map();
+    for (const n of this.cy.nodes().not('.group, .lane, .bubble')) groupOf.set(n.id(), n.data('group'));
+    const pairs = new Map();
+    const inside = new Map();
+    for (const e of this.cy.edges().not('.cluster-edge')) {
+      const s = groupOf.get(e.data('source'));
+      const t = groupOf.get(e.data('target'));
+      if (!s || !t) continue;
+      const count = e.data('count') || 1;
+      if (s === t) {
+        inside.set(s, (inside.get(s) ?? 0) + count);
+        continue;
+      }
+      const key = s + '>' + t;
+      let p = pairs.get(key);
+      if (!p) pairs.set(key, (p = { s, t, total: 0, links: 0, uncertain: 0, kinds: {}, top: [] }));
+      p.total += count;
+      p.links++;
+      p.kinds[e.data('kind')] = (p.kinds[e.data('kind')] ?? 0) + count;
+      if (e.hasClass('uncertain')) p.uncertain += count;
+      // The busiest card pairs, for the tooltip.
+      if (p.top.length < 4 || count > p.top[p.top.length - 1].count) {
+        p.top.push({ source: e.data('source'), target: e.data('target'), kind: e.data('kind'), count });
+        p.top.sort((a, b) => b.count - a.count);
+        if (p.top.length > 4) p.top.pop();
+      }
+    }
+    this.clusterInside = inside;
+    return [...pairs.values()].map((p) => {
+      const kind = Object.entries(p.kinds).sort((a, b) => b[1] - a[1])[0][0];
+      return {
+        group: 'edges',
+        // sw: width on screen, in pixels (scaleClusters turns it into graph units for the current zoom).
+        data: { id: `cluster:${p.s}>${p.t}`, source: 'bubble:' + p.s, target: 'bubble:' + p.t, kind, total: p.total, links: p.links, uncertain: p.uncertain, kinds: p.kinds, top: p.top, sw: Math.min(1.5 + Math.log2(p.total) * 0.7, 7), cw: 1, step: 40 },
+        classes: `cluster-edge ${kind}`,
+      };
+    });
+  }
+
+  /** Bubbles and lines keep their size on screen at any zoom (graph sizes shrink with the zoom), bubbles within their box. */
+  scaleClusters() {
+    const z = this.cy.zoom();
+    if (z === this.clusterZoom) return;
+    this.clusterZoom = z;
+    this.cy.batch(() => {
+      this.cy.edges('.cluster-edge').forEach((e) => e.data({ cw: e.data('sw') / z, step: 30 / z }));
+      this.cy.elements('.cl-chain').forEach((e) => e.data(e.isEdge() ? { zw: 2.4 / z } : { cp: 5 / z }));
+      this.cy.nodes('.bubble').forEach((n) => {
+        const d = Math.min(n.data('px') / z, n.data('max'));
+        // The count fits inside the bubble or is not drawn (min-zoomed-font-size); the tooltip has it either way.
+        n.data({ d, bfs: Math.min(12, (d * z) / (n.data('label').length * 0.62 + 1.2)) / z, bw: 1.5 / z, hp: 10 / z });
+      });
+    });
+  }
+
+  /**
+   * With a focus while clustered, the focused chain shows as cards (with its edges) over the dimmed clusters;
+   * without one, every card is in its cluster.
+   */
+  refreshClusterFocus() {
+    const cy = this.cy;
+    cy.batch(() => {
+      const cards = cy.nodes().not('.group, .lane, .bubble');
+      const focused = this.state.selected || this.state.selectedEdge ? cards.not('.faded') : cy.collection();
+      cards.not(focused).addClass('clustered');
+      focused.removeClass('clustered');
+      cy.elements('.bubble, .cluster-edge').removeClass('faded hl').toggleClass('cluster-dim', focused.nonempty());
+      // The chain keeps a readable width on screen however far out the zoom is.
+      const z = cy.zoom();
+      cy.elements('.cl-chain').removeClass('cl-chain');
+      focused.addClass('cl-chain').data('cp', 5 / z);
+      cy.edges('.hl').addClass('cl-chain').data('zw', 2.4 / z);
+    });
+  }
+
+  /** Zoom into a cluster: far enough for its cards to show, its top first if it is taller than the screen. */
+  zoomIntoCluster(node) {
+    this.fitTo(this.cy.getElementById('group:' + node.data('group')), true, 1.1, CLUSTER_ZOOM.leave + 0.06);
+  }
+
+  /** Clusters on or off (View menu); remembered. */
+  setClusters(on) {
+    this.state.clusters = on;
+    store.set('seammap.clusters', on ? 'on' : 'off');
+    $('#btn-clusters').setAttribute('aria-checked', String(on));
+    this.updateClusters();
   }
 
   /** Show only the focused chain and lay it out on its own; positions are restored afterwards. */
@@ -1000,6 +1173,7 @@ class App {
       this.routeEdges();
       this.addLanes();
     }
+    if (on && this.clustered) this.setClustered(false);
     if (on) {
       this.savedPositions = new Map(cy.nodes().filter((n) => !n.isParent() && !n.hasClass('lane')).map((n) => [n.id(), { ...n.position() }]));
       const kept = this.applyFocus(node);
@@ -1129,7 +1303,7 @@ class App {
     if (msg.action === 'lens') this.setSecLens(msg.on);
     if (msg.action === 'tab') this.setTab(msg.tab);
     reply({
-      cards: this.cy.nodes().not('.lane, .group').length,
+      cards: this.cy.nodes().not('.lane, .group, .bubble').length,
       selected: this.state.selected ?? null,
       tab: this.state.tab,
       secLens: Boolean(this.state.secLens),
@@ -1203,8 +1377,12 @@ class App {
   // --- tooltip & toasts ---------------------------------------------------------------
 
   showTooltip(id, rendered) {
+    this.showTooltipHtml(tooltipHtml(this, id), rendered);
+  }
+
+  showTooltipHtml(html, rendered) {
     const tip = $('#tooltip');
-    tip.innerHTML = tooltipHtml(this, id);
+    tip.innerHTML = html;
     tip.hidden = false;
     this.moveTooltip(rendered);
   }
@@ -1318,18 +1496,23 @@ class App {
 
   bind() {
     const cy = this.cy;
-    const isCard = (n) => !n.hasClass('lane') && !n.hasClass('group');
+    const isCard = (n) => !n.hasClass('lane') && !n.hasClass('group') && !n.hasClass('bubble');
     cy.on('tap', 'node', (e) => {
       if (isCard(e.target)) this.select(e.target.id());
+      else if (e.target.hasClass('bubble')) this.zoomIntoCluster(e.target);
     });
     cy.on('tap', 'edge', (e) => {
       const edge = e.target;
+      if (edge.hasClass('cluster-edge')) {
+        this.fitTo(cy.collection(edge.connectedNodes().map((n) => cy.getElementById('group:' + n.data('group')))), true, 1.1);
+        return;
+      }
       this.state.selected = null;
       this.state.selectedEdge = edge.id();
       cy.batch(() => {
         cy.elements().removeClass('faded hl focus');
         const ends = edge.connectedNodes();
-        cy.elements().not(ends.union(ends.ancestors()).union(edge)).not('.lane, .group').addClass('faded');
+        cy.elements().not(ends.union(ends.ancestors()).union(edge)).not('.lane, .group, .bubble, .cluster-edge').addClass('faded');
         edge.addClass('hl');
       });
       this.setTab('inspect');
@@ -1344,6 +1527,20 @@ class App {
       else this.openInEditor(id);
     });
     cy.on('cxttap', 'node', (e) => isCard(e.target) && this.openInEditor(e.target.id()));
+    // Clusters and the lines between them: details on hover.
+    const hoverTip = (e, html) => {
+      e.target.addClass(e.target.isNode() ? 'hover' : 'hover-hl');
+      clearTimeout(this.tipTimer);
+      const p = e.renderedPosition;
+      this.tipTimer = setTimeout(() => this.showTooltipHtml(html(), p), 120);
+    };
+    cy.on('mouseover', 'node.bubble', (e) => hoverTip(e, () => clusterTooltipHtml(this, e.target)));
+    cy.on('mouseover', 'edge.cluster-edge', (e) => hoverTip(e, () => clusterEdgeTooltipHtml(this, e.target)));
+    cy.on('mousemove', 'edge.cluster-edge', (e) => this.moveTooltip(e.renderedPosition));
+    cy.on('mouseout', 'node.bubble, edge.cluster-edge', (e) => {
+      e.target.removeClass('hover hover-hl');
+      this.hideTooltip();
+    });
     cy.on('mouseover', 'node', (e) => {
       const n = e.target;
       if (!isCard(n)) return;
@@ -1408,6 +1605,8 @@ class App {
       this.render();
     });
     $('#btn-theme').addEventListener('click', () => this.applyTheme(this.theme.name === 'dark' ? 'light' : 'dark'));
+    $('#btn-clusters').setAttribute('aria-checked', String(this.state.clusters));
+    $('#btn-clusters').addEventListener('click', () => this.setClusters(!this.state.clusters));
     $('#btn-help').addEventListener('click', () => $('#help-dialog').showModal());
     $('#btn-panel').addEventListener('click', () => this.togglePanel());
     document.querySelector('[data-close-dialog]').addEventListener('click', () => $('#help-dialog').close());
@@ -1615,7 +1814,7 @@ async function main() {
   await app.render();
   if (!graph.nodes.length) $('#nothing-found').hidden = false;
   else app.onboarding();
-  postToHost({ type: 'ready', cards: app.cy.nodes().not('.lane, .group').length });
+  postToHost({ type: 'ready', cards: app.cy.nodes().not('.lane, .group, .bubble').length });
   // When the first frame of the map has been drawn (the extension's timing tests compare the two).
   const readyAt = performance.now();
   requestAnimationFrame(() => setTimeout(() => postToHost({ type: 'painted', ms: Math.round(performance.now() - readyAt) }), 0));

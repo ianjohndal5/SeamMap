@@ -701,6 +701,49 @@ export function renderFilters(app) {
 // ---------------------------------------------------------------------------
 // Tooltip
 
+const KIND_LABEL = { imports: 'imports', uses: 'uses', calls: 'calls', renders: 'renders', http: 'HTTP calls', handles: 'handles' };
+
+/** Tooltip of a cluster (a role group standing for its cards while zoomed out). */
+export function clusterTooltipHtml(app, node) {
+  const g = node.data('group');
+  const cards = node.data('count');
+  const sum = (edges) => edges.reduce((n, e) => n + e.data('total'), 0);
+  const out = node.outgoers('edge.cluster-edge');
+  const inc = node.incomers('edge.cluster-edge');
+  const inside = app.clusterInside?.get(g) ?? 0;
+  const color = app.theme.groups[g] ?? app.theme.muted;
+  const row = (label, value) => `<div class="tip-row"><span>${label}</span><span class="mono">${value}</span></div>`;
+  return `<div class="tip-head"><span class="row-icon" style="--c:${color}">${icon(GROUPS[g]?.icon, 13)}</span><span class="tip-title">${esc(GROUPS[g]?.label ?? g)}</span></div>
+    <div class="tip-kind">${esc(LANES[laneOf(g)]?.title ?? '')} · ${fmt(cards)} card${cards === 1 ? '' : 's'}</div>
+    <div class="tip-rows">
+      ${out.length ? row(`Out to ${out.length} group${out.length === 1 ? '' : 's'}`, fmt(sum(out))) : ''}
+      ${inc.length ? row(`In from ${inc.length} group${inc.length === 1 ? '' : 's'}`, fmt(sum(inc))) : ''}
+      ${inside ? row('Within the group', fmt(inside)) : ''}
+      ${!out.length && !inc.length && !inside ? row('No links', '') : ''}
+    </div>
+    <div class="tip-foot"><span>Click to zoom in</span></div>`;
+}
+
+/** Tooltip of the line between two clusters: what the edges between their cards are, and the busiest pairs. */
+export function clusterEdgeTooltipHtml(app, edge) {
+  const { M, theme } = app;
+  const s = edge.source().data('group');
+  const t = edge.target().data('group');
+  const kinds = Object.entries(edge.data('kinds')).sort((a, b) => b[1] - a[1]);
+  const uncertain = edge.data('uncertain');
+  const name = (id) => esc(M.byId.get(id) ? displayName(M, id) : id);
+  return `<div class="tip-head"><span class="tip-title">${esc(GROUPS[s]?.label ?? s)} → ${esc(GROUPS[t]?.label ?? t)}</span></div>
+    <div class="tip-kind">${fmt(edge.data('total'))} link${edge.data('total') === 1 ? '' : 's'} between ${fmt(edge.data('links'))} pair${edge.data('links') === 1 ? '' : 's'} of cards${uncertain ? ` · ${fmt(uncertain)} uncertain` : ''}</div>
+    <div class="tip-rows">
+      ${kinds.map(([k, n]) => `<div class="tip-row"><span><i class="line-swatch" style="--c:${theme.edges[k]}"></i>${esc(KIND_LABEL[k] ?? k)}</span><span class="mono">${fmt(n)}</span></div>`).join('')}
+    </div>
+    <div class="tip-pairs">${edge
+      .data('top')
+      .map((p) => `<div class="tip-pair"><span>${name(p.source)}</span><span class="muted">→</span><span>${name(p.target)}</span>${p.count > 1 ? `<span class="mono muted">×${fmt(p.count)}</span>` : ''}</div>`)
+      .join('')}</div>
+    <div class="tip-foot"><span>Click to zoom to both groups</span></div>`;
+}
+
 export function tooltipHtml(app, id) {
   const { M } = app;
   const n = M.byId.get(id);
