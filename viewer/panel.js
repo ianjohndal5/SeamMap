@@ -751,14 +751,16 @@ export function clusterTooltipHtml(app, node) {
 /** Tooltip of the line between two bubbles: both directions, the kinds of edges, and the busiest pairs of cards. */
 export function clusterEdgeTooltipHtml(app, edge) {
   const { M, theme } = app;
-  const a = esc(edge.source().data('name'));
-  const b = esc(edge.target().data('name'));
-  const ab = edge.data('ab');
-  const ba = edge.data('ba');
+  // The busier direction first, so a one-way line always reads left to right.
+  const forward = edge.data('ab') >= edge.data('ba');
+  const a = esc((forward ? edge.source() : edge.target()).data('name'));
+  const b = esc((forward ? edge.target() : edge.source()).data('name'));
+  const ab = edge.data(forward ? 'ab' : 'ba');
+  const ba = edge.data(forward ? 'ba' : 'ab');
   const kinds = Object.entries(edge.data('kinds')).sort((x, y) => y[1] - x[1]);
   const uncertain = edge.data('uncertain');
   const name = (id) => esc(M.byId.get(id) ? displayName(M, id) : id);
-  return `<div class="tip-head"><span class="tip-title">${a} ${ab && ba ? '↔' : ab ? '→' : '←'} ${b}</span></div>
+  return `<div class="tip-head"><span class="tip-title">${a} ${ba ? '↔' : '→'} ${b}</span></div>
     <div class="tip-kind">${plural(edge.data('total'), 'link')} between ${plural(edge.data('links'), 'pair')} of cards${uncertain ? ` · ${fmt(uncertain)} uncertain` : ''}</div>
     <div class="tip-rows">
       ${ab ? tipRow(`${a} → ${b}`, fmt(ab)) : ''}

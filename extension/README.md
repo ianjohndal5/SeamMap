@@ -18,6 +18,9 @@ On the map: click a card to focus it and its neighbours, **Isolate** on the sele
 search by name, path or a URL like `/api/users/42`, and double-click a function, method or endpoint (or use
 **Open file** in the side panel) to open it beside the map. `?` lists every shortcut.
 
+On a large project, zooming out gathers the cards into one bubble per role group (controllers, models, pages...),
+with one line per pair of groups; hover a bubble or a line for what it stands for, and click to zoom back in.
+
 ## Commands
 
 | Command | What it does |

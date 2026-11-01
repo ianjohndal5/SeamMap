@@ -1412,6 +1412,8 @@ class App {
   select(id, { center = false } = {}) {
     this.state.selected = id;
     this.state.selectedEdge = null;
+    // The first-view halo has done its job (it is sized for the overview, and would cover a zoomed-in chain).
+    this.cy.nodes('.start-hint, .cluster-hint').removeClass('start-hint cluster-hint');
     const node = this.cy.getElementById(id);
     this.cy.elements().unselect();
     this.setTab('inspect', false);

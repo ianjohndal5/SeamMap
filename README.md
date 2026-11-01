@@ -14,9 +14,13 @@ The question it answers is *"which component calls which endpoint, which control
 
 ![Light theme with insights](docs/fixtures-light-insights.png)
 
-*A real Laravel app (Firefly III, 1,221 PHP files and 639 routes) in grouped mode, zoomed out: one bubble per role group with its card count, one line per pair of groups (zoom in for the cards):*
+*A real Laravel app, [Firefly III](https://github.com/firefly-iii/firefly-iii) (1,221 PHP files, 639 routes), zoomed out. Each role group is one bubble with its card count, and one line per pair of groups stands for every edge between their cards. Hovering a line shows what it carries: here, 391 routes handled by controllers, and the busiest pairs. Zoom in or click a bubble for the cards.*
 
-![Firefly III grouped overview, clustered](docs/firefly-grouped.png)
+![Firefly III zoomed out: one bubble per role group, one line per pair, and a line's details on hover](docs/firefly-clusters.png)
+
+*From there, **Trace its chain** on the suggested start (the most connected endpoint) isolates one request: `DELETE /api/v1/data/destroy` → `DestroyController::destroy` → what it calls.*
+
+![Firefly III: the suggested start's chain, isolated](docs/firefly-chain.png)
 
 ---
 
@@ -353,7 +357,7 @@ Plain HTML + JavaScript ES modules (`viewer/`, no build step) using Cytoscape.js
 * **Lanes.** Tinted lanes sit behind the three columns. Their headers stay pinned to the top of the canvas while you pan and show counts. The dot grid moves and scales with the canvas.
 * **Cards.** Each card has a coloured left tab with a role icon (controller, model, service, page, component, hook, API client, …), or for endpoints an HTTP-method badge (GET green, POST blue, PUT/PATCH amber, DELETE red), and a short label: class name, route path or file name. The full path is in the tooltip and the panel.
 * **Fonts.** Inter for UI and labels, JetBrains Mono for paths and routes (variable fonts, one file each, bundled). The HTTP-method badges on cards are drawn in the system's sans-serif: they are images, which can't use web fonts.
-* **Readable on first load.** Small graphs open at no less than 68% zoom (14px card text), centred. Large graphs open fitted whole and clustered (one bubble per role group, see [Viewer](#viewer)), with the suggested start's group haloed until the first click. With clusters turned off, where fitting everything would leave nothing readable, they open fitted to the width of the lanes instead, top-aligned so the group titles read, with the suggested start scrolled into view and haloed. Whatever is off-screen is one `F` (fit everything) or minimap drag away. Lane headers never clip their titles; when the lanes are narrow they move apart instead.
+* **Readable on first load.** Small graphs open at no less than 68% zoom (14px card text), centred. Large graphs open fitted whole and clustered (one bubble per role group, see *Clusters when zoomed out* below), with the suggested start's group haloed until the first click or selection. With clusters turned off, where fitting everything would leave nothing readable, they open fitted to the width of the lanes instead, top-aligned so the group titles read, with the suggested start scrolled into view and haloed. Whatever is off-screen is one `F` (fit everything) or minimap drag away. Lane headers never clip their titles; when the lanes are narrow they move apart instead.
 * **Accessible.** Text meets WCAG AA contrast (4.5:1) in both themes, every control has a visible keyboard focus and a name, and the side panel's tabs shrink to icons (names in their tooltips) when they don't fit. Narrow windows start with the panel closed (`P` opens it).
 * **Empty and broken states.** A graph with nothing in it says what was scanned and what to check; a `graph.json` of another format version says which version wrote it (see [Versioning](#versioning)).
 * **Feedback.** Hover tooltips, toasts (copy, opening VS Code) and a one-time tip on first visit; isolation shows on the selection bar and in the status bar.
@@ -366,7 +370,13 @@ Plain HTML + JavaScript ES modules (`viewer/`, no build step) using Cytoscape.js
   * **Endpoints:** Laravel routes, Next.js handlers, Unmatched calls.
 
   ELK layered then places only the group boxes, in the same bands. Positions are computed before the elements are added to Cytoscape. Group boxes are plain background nodes rather than compound parents, because compound parents with hundreds of children made every redraw slow (3 fps vs ~55 fps measured). Group titles keep a readable on-screen size at any zoom. For speed, large graphs draw cards with a role-coloured outline instead of the icon tab: restyling thousands of image-backed cards was about 30% of the focus/expand cost.
-* **Clusters when zoomed out** (large grouped maps). Below about 40% zoom, where card labels are too small to read anyway, the cards and their edges hide and the group boxes empty: each role group becomes one bubble at its centre with its card count, its name underneath. Like map marker clusters, bubbles keep their size on screen, and bubbles of one lane that would overlap merge into one (a double ring, named after its biggest group, e.g. *Controllers +7*), splitting again as you zoom in; merged groups need a little more room before they split, so zooming back and forth doesn't flicker. One line per pair of bubbles stands for every edge between their cards, both directions together. Its width and opacity grow with the number of links (log scale), so the strong connections stand out and the weak ones recede. It carries an arrow at its middle only when nearly all of its links (80%) go one way, and it bends around bubbles that sit in its way. Names that would collide are left out (above the bubble when there is no room below). Hover a bubble for its links in and out (and its groups, when merged); hover a line for both directions, its counts by edge kind, how many are uncertain, and its four busiest pairs of cards. Click a bubble to zoom in (a merged one to where it splits), or a line to zoom to both ends. A focus while clustered keeps the focused chain as cards, drawn at a fixed width on screen, over the dimmed clusters. Cards come back above 44% zoom and the bubbles return below 38%. Small maps, flow mode and isolated views always show cards.
+* **Clusters when zoomed out** (large grouped maps). Below about 40% zoom, where card labels are too small to read anyway, the map switches to clusters, like markers on a map:
+  * **Bubbles.** Each role group becomes one bubble at its centre, sized by its card count, with its name underneath (above when there is no room below, left out when it would collide; the tooltip has it). The cards, their edges and the group boxes hide. Bubbles keep their size on screen at any zoom.
+  * **Merging.** Bubbles of one lane that would overlap merge into one, drawn with a double ring and named after its biggest group (*Controllers +7*). They split again as you zoom in; merged groups need a little more room before they split, so zooming back and forth doesn't flicker.
+  * **Lines.** One line per pair of bubbles stands for every edge between their cards, both directions together. Its width and opacity grow with the number of links (log scale), so strong connections stand out and weak ones recede. It has an arrow at its middle only when at least 80% of its links go one way, and it bends around bubbles in its way.
+  * **Details.** Hover a bubble for its links in and out (and its groups, when merged). Hover a line for both directions, its counts by edge kind, how many links are uncertain, and its four busiest pairs of cards. Click a bubble to zoom in (a merged one to where it splits), or a line to zoom to both ends.
+  * **Focus.** Selecting something while clustered keeps its chain as cards, drawn at a fixed width on screen, over the dimmed clusters.
+  * **When.** Cards come back above 44% zoom and bubbles return below 38%. Small maps, flow mode and isolated views always show cards. **View** → **Group cards when zoomed out** turns clusters off.
 * **Why two modes.** Edge-driven ELK layered on the full file graph does not scale. In a benchmark it took 1.7–11 s per 1,000-file column, ran out of memory at 2,400 nodes on a random graph, and produced drawings tens of thousands of pixels wide. Grouped mode keeps ELK's job small and the result predictable. Flow mode, and **Isolate** on any focused subset, give the layered picture where it is readable.
 
 **Edges and focus.**
@@ -643,9 +653,9 @@ Machine: Intel Core i3-1115G4 (2 cores / 4 threads, 3.0 GHz), 8 GB RAM, Linux, N
 | Firefly III: 1,860 cards, 8,650 edges | 2.1 s (layout 0.37 s) | 0.67 / 0.50 s | 0.56 s | 1.8 s | 0.16–0.40 s | 60 fps |
 | Langfuse `web/`: 4,685 cards, 26,946 edges | 5.5 s (layout 0.58 s) | 1.9 / 2.0 s | 1.6 s | 5.1 s | 0.49–1.25 s | 60 fps |
 
-Pan and zoom stay smooth because Cytoscape hides edges and uses a texture during gestures. Only the single full redraw when a gesture ends takes longer: about 0.1 s on Firefly III and 0.25–0.45 s on Langfuse.
+Pan and zoom stay smooth because Cytoscape hides edges and uses a texture during gestures. Only the single full redraw when a gesture ends takes longer: about 0.1 s on Firefly III and 0.25–0.45 s on Langfuse. Focus and expand are bound by Cytoscape restyling every element, which scales linearly. At the ~2,000-file target, interactions take about half a second.
 
-Zoomed out to the whole map, clusters replace thousands of cards and tens of thousands of edges with about a dozen bubbles and a few dozen lines (Firefly III: 12 bubbles and 38 lines for 1,860 cards and 8,700 edges). Main-thread time per pan step at that zoom (headless Chromium, 1440×900) fell from 1.1 s to about 0.3 s on Firefly III, and from 3.1 s to 0.5–0.7 s on a private 6,564-card map. Its slowest frames while dragging went from 0.87 s to 17 ms. What remains is Cytoscape walking the hidden elements on each redraw: taking them off the canvas would save that, but putting them back costs about 1.6 s every time the zoom crosses the threshold. Focus and expand are bound by Cytoscape restyling every element, which scales linearly. At the ~2,000-file target, interactions take about half a second.
+Zoomed out to the whole map, clusters replace thousands of cards and tens of thousands of edges with about a dozen bubbles and a few dozen lines (Firefly III: 12 bubbles and 38 lines for 1,860 cards and 8,700 edges). Main-thread time per pan step at that zoom (headless Chromium, 1440×900) fell from 1.1 s to about 0.3 s on Firefly III, and from 3.1 s to 0.5–0.7 s on a private 6,564-card map. Its slowest frames while dragging went from 0.87 s to 17 ms. What remains is Cytoscape walking the hidden elements on each redraw: taking them off the canvas would save that, but putting them back costs about 1.6 s every time the zoom crosses the threshold.
 
 ## Tests
 
@@ -726,9 +736,10 @@ src/
                     reach context), checks.ts (local checks), index.ts (report)
   server.ts         static viewer server (node:http)
 viewer/             no build step: index.html, style.css (design tokens, both themes) and ES modules:
-                    app.js (state, layouts, focus, events), graphstyle.js (Cytoscape styles), theme.js (palettes,
-                    groups, bands), icons.js (icons + card tabs), model.js (indexes, labels, search),
-                    panel.js (side panel + tooltip), minimap.js, host.js (browser tab or VS Code webview)
+                    app.js (state, layouts, focus, zoomed-out clusters, events), graphstyle.js (Cytoscape
+                    styles), theme.js (palettes, groups, bands), icons.js (icons + card tabs), model.js (indexes,
+                    labels, search), route.js (elbow edge routes), panel.js (side panel + tooltips), minimap.js,
+                    host.js (browser tab or VS Code webview)
 fixtures/           laravel-api/, next-web/, laravel-security/, next-security/, sarif/
 test/               vitest suites
 extension/          the VS Code extension: src/extension.cts (commands, worker, webview, watching), src/webview.cts

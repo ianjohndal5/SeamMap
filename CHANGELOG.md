@@ -63,6 +63,8 @@ with **Breaking:**.
 - Clearer messages: an unreadable `composer.json` or `.gitignore`, a project path from the config file that doesn't
   exist, an output folder that can't be written, a side with no files to analyze.
 - PHP method lookup is no longer quadratic on very large classes.
+- Viewer: the suggested start's halo on a large map's first view is cleared by any selection; after **Trace its
+  chain** it stayed, and covered the isolated chain.
 
 ### Results may differ
 
