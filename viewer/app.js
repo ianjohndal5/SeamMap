@@ -3,7 +3,7 @@
 // Cytoscape.js + the ELK layered layout. No build step, no framework.
 
 import { cardTab, icon, methodTab } from './icons.js';
-import { stylesheet } from './graphstyle.js';
+import { FONTS, stylesheet } from './graphstyle.js';
 import { Minimap } from './minimap.js';
 import { buildModel, descendants, displayName, editorUrl, groupKey, iconOf, labelOf, search, sizeOf } from './model.js';
 import { clusterEdgeTooltipHtml, clusterTooltipHtml, esc, methodPill, renderFilters, renderInsights, renderInspectEdge, renderInspectEmpty, renderInspectNode, renderSecurity, suggestedStart, tooltipHtml } from './panel.js';
@@ -39,6 +39,63 @@ const OVERVIEW_BELOW = 0.25;
  * 0.5 anyway, and drawing tens of thousands of edges at that scale is what made navigating slow.
  */
 const CLUSTER_ZOOM = { enter: 0.38, leave: 0.44 };
+/** Room between two bubbles of a lane, on screen, below which they merge (keep: merged ones, before they split). */
+const CLUSTER_GAP = { merge: 6, keep: 18 };
+
+/** #rrggbb colours a and b blended, t of a. */
+function mix(a, b, t) {
+  const hex = /^#[0-9a-f]{6}$/i;
+  if (!hex.test(a) || !hex.test(b)) return a;
+  const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const [x, y] = [rgb(a), rgb(b)];
+  return '#' + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, '0')).join('');
+}
+
+const compactCount = (n) => (n < 10000 ? n.toLocaleString('en-US') : Math.round(n / 1000) + 'k');
+
+/** The four busiest card pairs, deterministic on ties. */
+function busiest(pairs) {
+  return [...pairs].sort((a, b) => b.count - a.count || (a.source < b.source ? -1 : a.source > b.source ? 1 : a.target < b.target ? -1 : 1)).slice(0, 4);
+}
+
+/**
+ * Control-point distance (Cytoscape unbundled-bezier, positive towards the left of a→b) that bends the line a→b
+ * around the circles in its way: pick the side needing the smaller bend, passing every circle it meets on the
+ * way. 0 when nothing is in the way or going round would take a bend wider than the line is long.
+ */
+function bendAround(a, b, circles, margin) {
+  const L = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!L) return 0;
+  const ux = (b.x - a.x) / L;
+  const uy = (b.y - a.y) / L;
+  const near = [];
+  for (const o of circles) {
+    const w = ((o.x - a.x) * ux + (o.y - a.y) * uy) / L;
+    if (w <= 0.04 || w >= 0.96) continue;
+    // The curve's offset at w is f times the control distance (quadratic Bézier).
+    near.push({ p: (o.x - a.x) * -uy + (o.y - a.y) * ux, f: 2 * w * (1 - w), need: o.r + margin });
+  }
+  if (!near.some((o) => Math.abs(o.p) < o.need)) return 0;
+  const side = (sign) => {
+    let d = 0;
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false;
+      for (const o of near) {
+        const q = o.p * sign;
+        if (Math.abs(o.f * d - q) < o.need) {
+          d = (q + o.need) / o.f;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    return d;
+  };
+  const left = side(1);
+  const right = side(-1);
+  const d = left <= right ? left : -right;
+  return Math.abs(d) <= L * 0.8 ? d : 0;
+}
 /** Screen space kept free around a fitted graph (lane headers on top, docks below). */
 const FIT_PAD = { top: 64, bottom: 72, x: 36 };
 
@@ -317,13 +374,20 @@ class App {
     this.cy.batch(() => {
       this.cy.nodes().forEach((n) => {
         if (n.hasClass('lane')) n.data('accent', this.theme.lanes[n.data('lane')]);
-        else if (n.hasClass('group') || n.hasClass('bubble')) n.data('accent', this.theme.groups[n.data('group')]);
+        else if (n.hasClass('group')) n.data('accent', this.theme.groups[n.data('group')]);
+        else if (n.hasClass('cl')) return;
         else {
           const m = this.M.byId.get(n.id());
           if (m) n.data(nodeVisual(m, this.M.byId.get(this.M.topOf.get(m.id)), this.theme, this.large));
         }
       });
     });
+    // Bubble colours are mixed from the palette: rebuild them.
+    if (this.clustered) {
+      this.clusterSig = '';
+      this.clusterZoom = 0;
+      this.layoutClusters();
+    }
     this.minimap.setTheme(this.theme);
     this.updateThemeButton();
     this.renderLegendBar();
@@ -471,7 +535,7 @@ class App {
    */
   renderEdges(toggle = null) {
     const cy = this.cy;
-    const visible = new Set(cy.nodes().not('.group, .lane, .bubble').map((n) => n.id()));
+    const visible = new Set(cy.nodes().not('.group, .lane, .cl').map((n) => n.id()));
     if (toggle) {
       const kinds = new Set(Object.keys(TOGGLE_OF).filter((k) => TOGGLE_OF[k] === toggle));
       if (this.state.kinds[toggle]) {
@@ -568,7 +632,7 @@ class App {
     const nodes = cy.nodes().not('.group, .lane, .isolated-out').length;
     const edges = cy.edges().not('.isolated-out').length;
     $('#status-left').textContent = this.clustered
-      ? `${cy.nodes('.bubble').length} groups · ${cy.edges('.cluster-edge').length} lines between them, for ${cy.nodes('.top').length.toLocaleString()} cards · zoom in for cards`
+      ? `${cy.nodes('.bubble').length} clusters · ${cy.edges('.cluster-edge').length} lines · ${cy.nodes('.top').length.toLocaleString()} cards · zoom in for cards`
       : `${nodes.toLocaleString()} cards · ${edges.toLocaleString()} edges · ${this.lastLayout.mode} layout ${this.lastLayout.ms} ms${this.state.isolated ? ' · isolated' : ''}`;
     $('#status-right').textContent = `${this.meta.stats.files.toLocaleString()} files analyzed in ${this.meta.durationMs.toLocaleString()} ms · ${new Date(this.meta.generatedAt).toLocaleString()}`;
   }
@@ -996,7 +1060,7 @@ class App {
       }
       const nodes = eles.nodes();
       kept = nodes.union(nodes.ancestors()).union(eles.edges());
-      cy.elements().not(kept).not('.lane, .group, .bubble, .cluster-edge').addClass('faded');
+      cy.elements().not(kept).not('.lane, .group, .cl').addClass('faded');
       eles.edges().addClass('hl');
       node.addClass('focus');
     });
@@ -1005,6 +1069,12 @@ class App {
   }
 
   // --- clusters (zoomed-out grouped layouts) --------------------------------------------
+  //
+  // Like map marker clusters: zoomed out on a large grouped map, the cards hide and each role group is one bubble
+  // with its card count. Bubbles keep their size on screen; bubbles of one lane that would overlap merge, and split
+  // again as you zoom in. One line per pair of bubbles stands for every edge between their cards, both directions
+  // together: its width and opacity grow with the number of links, and it bends around the bubbles in its way.
+  // The group statistics are collected once; merging, sizes, captions and bends follow the zoom.
 
   /** Should the map be clustered now? Large grouped layouts, zoomed out, not isolated, not switched off. */
   clusterWanted() {
@@ -1013,69 +1083,58 @@ class App {
     return this.clustered ? z < CLUSTER_ZOOM.leave : z < CLUSTER_ZOOM.enter;
   }
 
-  /** Called on every viewport change (once per frame): switch between clusters and cards when the zoom crosses over. */
+  /** Called on every viewport change (once per frame): switch between clusters and cards, or follow the zoom. */
   updateClusters() {
     const want = this.clusterWanted();
     if (want !== Boolean(this.clustered)) this.setClustered(want);
-    else if (want) this.scaleClusters();
+    else if (want) this.layoutClusters();
   }
 
-  /**
-   * Clusters on: the cards hide (their edges go with them) and each role group shows one bubble at its centre,
-   * with its card count, and one line per pair of groups. The group boxes and lanes stay, as the map's outline.
-   */
+  /** Clusters on (cards hidden, group boxes emptied, bubbles and lines added) or off. */
   setClustered(on) {
     const cy = this.cy;
     this.clustered = on;
     this.clusterZoom = 0;
+    this.clusterSig = '';
+    this.clusterOf = new Map();
     cy.batch(() => {
-      cy.remove('.bubble, .cluster-edge');
+      cy.remove('.cl');
       if (!on) {
-        cy.elements('.clustered, .cl-chain').removeClass('clustered cl-chain');
+        cy.elements('.clustered, .cl-chain, .cl-hidden').removeClass('clustered cl-chain cl-hidden');
         return;
       }
-      cy.add([...this.clusterBubbles(), ...this.clusterEdges()]);
+      cy.nodes('.group').addClass('cl-hidden');
+      this.clusterStats = this.collectClusterStats();
     });
     if (on) {
-      this.scaleClusters();
+      this.layoutClusters();
       this.refreshClusterFocus();
     }
     this.hideTooltip();
     this.updateStatus();
   }
 
-  /** One bubble per role group, at the centre of its box. */
-  clusterBubbles() {
-    const counts = new Map();
-    for (const n of this.cy.nodes('.top')) counts.set(n.data('group'), (counts.get(n.data('group')) ?? 0) + 1);
-    const hint = this.cy.nodes('.start-hint').not('.group').data('group');
-    return this.cy.nodes('.group').map((box) => {
+  /** Per role group: its lane, card count and centre; per ordered pair of groups, the edges between their cards. */
+  collectClusterStats() {
+    const cy = this.cy;
+    const groups = new Map();
+    for (const box of cy.nodes('.group')) {
       const g = box.data('group');
-      const count = counts.get(g) ?? 0;
-      const { w, h } = box.boundingBox({ includeLabels: false, includeOverlays: false, includeUnderlays: false, includeOutlines: false });
-      return {
-        group: 'nodes',
-        // px: diameter on screen, in pixels (scaleClusters turns it into graph units for the current zoom, never
-        // wider than the group's box); max: the box's smaller side.
-        data: { id: 'bubble:' + g, group: g, accent: box.data('accent'), count, label: count.toLocaleString(), px: 24 + 5.5 * Math.log2(count + 1), max: Math.min(w, h) * 0.9, d: 10, bfs: 10, bw: 1, hp: 8 },
-        position: { ...box.position() },
-        classes: g === hint ? 'bubble cluster-hint' : 'bubble',
-        selectable: false,
-        grabbable: false,
-      };
-    });
-  }
-
-  /** One edge per pair of groups (both directions apart), carrying the counts of the card edges it stands for. */
-  clusterEdges() {
+      groups.set(g, { lane: laneOf(g), count: 0, x: box.position('x'), y: box.position('y') });
+    }
+    for (const n of cy.nodes('.top')) {
+      const s = groups.get(n.data('group'));
+      if (s) s.count++;
+    }
+    for (const [g, s] of groups) if (!s.count) groups.delete(g);
     const groupOf = new Map();
-    for (const n of this.cy.nodes().not('.group, .lane, .bubble')) groupOf.set(n.id(), n.data('group'));
+    for (const n of cy.nodes().not('.group, .lane, .cl')) groupOf.set(n.id(), n.data('group'));
     const pairs = new Map();
     const inside = new Map();
-    for (const e of this.cy.edges().not('.cluster-edge')) {
+    for (const e of cy.edges().not('.cl')) {
       const s = groupOf.get(e.data('source'));
       const t = groupOf.get(e.data('target'));
-      if (!s || !t) continue;
+      if (!groups.has(s) || !groups.has(t)) continue;
       const count = e.data('count') || 1;
       if (s === t) {
         inside.set(s, (inside.get(s) ?? 0) + count);
@@ -1088,38 +1147,186 @@ class App {
       p.links++;
       p.kinds[e.data('kind')] = (p.kinds[e.data('kind')] ?? 0) + count;
       if (e.hasClass('uncertain')) p.uncertain += count;
-      // The busiest card pairs, for the tooltip.
-      if (p.top.length < 4 || count > p.top[p.top.length - 1].count) {
-        p.top.push({ source: e.data('source'), target: e.data('target'), kind: e.data('kind'), count });
-        p.top.sort((a, b) => b.count - a.count);
-        if (p.top.length > 4) p.top.pop();
-      }
+      p.top.push({ source: e.data('source'), target: e.data('target'), count });
     }
-    this.clusterInside = inside;
-    return [...pairs.values()].map((p) => {
-      const kind = Object.entries(p.kinds).sort((a, b) => b[1] - a[1])[0][0];
-      return {
-        group: 'edges',
-        // sw: width on screen, in pixels (scaleClusters turns it into graph units for the current zoom).
-        data: { id: `cluster:${p.s}>${p.t}`, source: 'bubble:' + p.s, target: 'bubble:' + p.t, kind, total: p.total, links: p.links, uncertain: p.uncertain, kinds: p.kinds, top: p.top, sw: Math.min(1.5 + Math.log2(p.total) * 0.7, 7), cw: 1, step: 40 },
-        classes: `cluster-edge ${kind}`,
-      };
-    });
+    // The busiest card pairs, for the tooltips.
+    for (const p of pairs.values()) p.top = busiest(p.top);
+    return { groups, pairs, inside };
   }
 
-  /** Bubbles and lines keep their size on screen at any zoom (graph sizes shrink with the zoom), bubbles within their box. */
-  scaleClusters() {
-    const z = this.cy.zoom();
-    if (z === this.clusterZoom) return;
-    this.clusterZoom = z;
-    this.cy.batch(() => {
-      this.cy.edges('.cluster-edge').forEach((e) => e.data({ cw: e.data('sw') / z, step: 30 / z }));
-      this.cy.elements('.cl-chain').forEach((e) => e.data(e.isEdge() ? { zw: 2.4 / z } : { cp: 5 / z }));
-      this.cy.nodes('.bubble').forEach((n) => {
-        const d = Math.min(n.data('px') / z, n.data('max'));
-        // The count fits inside the bubble or is not drawn (min-zoomed-font-size); the tooltip has it either way.
-        n.data({ d, bfs: Math.min(12, (d * z) / (n.data('label').length * 0.62 + 1.2)) / z, bw: 1.5 / z, hp: 10 / z });
+  /** A bubble's diameter on screen, in pixels: grows with its card count, never wider than its lane. */
+  bubbleSize(count, lane, z) {
+    const px = 18 + 4.5 * Math.log2(count + 1);
+    const b = this.laneBoxes?.[lane];
+    return b ? Math.min(px, (b.x2 - b.x1) * z * 0.9) : px;
+  }
+
+  /**
+   * The clusters at zoom z: start with one per group, then merge the closest overlapping pair of one lane until
+   * none overlap. Groups merged at the previous zoom need more room before they split again (no flicker).
+   */
+  mergeClusters(z) {
+    const { groups } = this.clusterStats;
+    let list = [...groups].map(([g, s]) => ({ members: [g], lane: s.lane, count: s.count, x: s.x, y: s.y }));
+    const prev = this.clusterOf;
+    const together = (a, b) => a.members.some((g) => prev.has(g) && b.members.some((h) => prev.get(h) === prev.get(g)));
+    const r = (c) => this.bubbleSize(c.count, c.lane, z) / 2;
+    for (;;) {
+      let best = null;
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i];
+          const b = list[j];
+          if (a.lane !== b.lane) continue;
+          const room = Math.hypot(a.x - b.x, a.y - b.y) * z - r(a) - r(b) - (together(a, b) ? CLUSTER_GAP.keep : CLUSTER_GAP.merge);
+          if (room < 0 && (!best || room < best.room)) best = { i, j, room };
+        }
+      }
+      if (!best) break;
+      const a = list[best.i];
+      const b = list[best.j];
+      const count = a.count + b.count;
+      const merged = { members: [...a.members, ...b.members], lane: a.lane, count, x: (a.x * a.count + b.x * b.count) / count, y: (a.y * a.count + b.y * b.count) / count };
+      list = list.filter((_, k) => k !== best.i && k !== best.j);
+      list.push(merged);
+    }
+    for (const c of list) {
+      c.members.sort((g, h) => groups.get(h).count - groups.get(g).count || (g < h ? -1 : 1));
+      c.key = c.members.join('+');
+    }
+    return list.sort((a, b) => (a.key < b.key ? -1 : 1));
+  }
+
+  /** Bubbles, their captions, and one line per pair of bubbles with the counts of the card edges it stands for. */
+  clusterElements(clusters) {
+    const { theme } = this;
+    const { groups, pairs, inside } = this.clusterStats;
+    const keyOf = new Map();
+    for (const c of clusters) for (const g of c.members) keyOf.set(g, c.key);
+    const within = new Map(clusters.map((c) => [c.key, c.members.reduce((n, g) => n + (inside.get(g) ?? 0), 0)]));
+    const lines = new Map();
+    for (const p of pairs.values()) {
+      const from = keyOf.get(p.s);
+      const to = keyOf.get(p.t);
+      if (from === to) {
+        within.set(from, within.get(from) + p.total);
+        continue;
+      }
+      const [a, b] = from < to ? [from, to] : [to, from];
+      let l = lines.get(a + '|' + b);
+      if (!l) lines.set(a + '|' + b, (l = { a, b, ab: 0, ba: 0, total: 0, links: 0, uncertain: 0, kinds: {}, top: [] }));
+      if (from === a) l.ab += p.total;
+      else l.ba += p.total;
+      l.total += p.total;
+      l.links += p.links;
+      l.uncertain += p.uncertain;
+      for (const [k, n] of Object.entries(p.kinds)) l.kinds[k] = (l.kinds[k] ?? 0) + n;
+      l.top.push(...p.top);
+    }
+    const hint = this.cy.nodes('.start-hint').not('.group').data('group');
+    const els = [];
+    for (const c of clusters) {
+      const one = c.members.length === 1;
+      const first = GROUPS[c.members[0]]?.label ?? c.members[0];
+      const accent = one ? theme.groups[c.members[0]] ?? theme.muted : theme.lanes[c.lane];
+      const name = one ? first : `${first} +${c.members.length - 1}`;
+      // Each element gets its own position object: Cytoscape keeps the one it is given.
+      const common = () => ({ group: 'nodes', position: { x: c.x, y: c.y }, selectable: false, grabbable: false });
+      els.push({
+        ...common(),
+        data: { id: 'bubble:' + c.key, members: c.members, lane: c.lane, count: c.count, within: within.get(c.key), accent, fill: mix(accent, theme.canvas, theme.bubbleMix), label: compactCount(c.count), name, d: 10, bfs: 10, bw: 1, hp: 4, hip: 9 },
+        classes: `cl bubble${one ? '' : ' merged'}${c.members.includes(hint) ? ' cluster-hint' : ''}`,
       });
+      els.push({ ...common(), data: { id: 'caption:' + c.key, label: name, count: c.count, accent, cfs: 11, cpad: 2 }, classes: 'cl caption' });
+    }
+    const max = Math.max(1, ...[...lines.values()].map((l) => l.total));
+    for (const [id, l] of lines) {
+      const kind = Object.entries(l.kinds).sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))[0][0];
+      const w = Math.log(l.total + 1) / Math.log(max + 1);
+      // An arrow only when nearly everything goes one way; the tooltip has both directions either way.
+      const dir = l.ab >= l.total * 0.8 ? 'ab' : l.ba >= l.total * 0.8 ? 'ba' : 'both';
+      els.push({
+        group: 'edges',
+        // sw: width on screen, in pixels (sizeClusters turns it into graph units); op: opacity, by weight.
+        data: { ...l, top: busiest(l.top), id: 'cluster:' + id, source: 'bubble:' + l.a, target: 'bubble:' + l.b, kind, dir, sw: 1 + 4.5 * w, op: 0.2 + 0.62 * w, cw: 1, cpd: 0 },
+        classes: `cl cluster-edge ${kind} dir-${dir}`,
+      });
+    }
+    return els;
+  }
+
+  /** Follow the zoom: merge or split bubbles, then size everything for the new zoom. */
+  layoutClusters() {
+    const cy = this.cy;
+    const z = cy.zoom();
+    if (z === this.clusterZoom || !this.clusterStats) return;
+    this.clusterZoom = z;
+    const clusters = this.mergeClusters(z);
+    const sig = clusters.map((c) => c.key).join('|');
+    const changed = sig !== this.clusterSig;
+    cy.batch(() => {
+      if (changed) {
+        this.clusterSig = sig;
+        this.clusterOf = new Map(clusters.flatMap((c) => c.members.map((g) => [g, c.key])));
+        cy.remove('.cl');
+        cy.add(this.clusterElements(clusters));
+        if (this.clusterFocus) cy.elements('.cl').addClass('cluster-dim');
+      }
+      this.sizeClusters(z);
+    });
+    if (changed) this.updateStatus();
+  }
+
+  /** Bubbles, lines, captions and a focused chain keep their size on screen at any zoom. */
+  sizeClusters(z) {
+    const cy = this.cy;
+    const geo = new Map();
+    cy.nodes('.bubble').forEach((n) => {
+      const px = this.bubbleSize(n.data('count'), n.data('lane'), z);
+      const label = n.data('label');
+      // The count fits inside the bubble or is not drawn (min-zoomed-font-size); the tooltip has it either way.
+      n.data({ d: px / z, bfs: Math.min(12.5, px / (label.length * 0.62 + 1.4)) / z, bw: (n.hasClass('merged') ? 4 : 2) / z, hp: 5 / z, hip: 10 / z });
+      geo.set(n.id(), { x: n.position('x'), y: n.position('y'), r: px / z / 2, count: n.data('count') });
+    });
+    cy.edges('.cluster-edge').forEach((e) => {
+      const s = e.data('source');
+      const t = e.data('target');
+      e.data({ cw: e.data('sw') / z, cpd: bendAround(geo.get(s), geo.get(t), [...geo].filter(([id]) => id !== s && id !== t).map(([, o]) => o), 7 / z) });
+    });
+    this.placeCaptions(z, geo);
+    cy.elements('.cl-chain').forEach((e) => e.data(e.isEdge() ? { zw: 2.4 / z } : { cp: 5 / z }));
+  }
+
+  /**
+   * Group names under their bubbles (above when there is no room below), biggest bubbles first; a name that fits
+   * nowhere is left out (the tooltip has it).
+   */
+  placeCaptions(z, geo) {
+    const ctx = (this.measureCtx ??= document.createElement('canvas').getContext('2d'));
+    ctx.font = `600 11px ${FONTS.sans}`;
+    const H = 11 * 1.3 + 4;
+    const taken = [...geo.values()].map((o) => ({ x1: (o.x - o.r) * z, x2: (o.x + o.r) * z, y1: (o.y - o.r) * z, y2: (o.y + o.r) * z }));
+    const caps = this.cy.nodes('.caption').sort((a, b) => b.data('count') - a.data('count') || (a.id() < b.id() ? -1 : 1));
+    caps.forEach((cap) => {
+      const o = geo.get('bubble:' + cap.id().slice('caption:'.length));
+      const W = ctx.measureText(cap.data('label')).width + 8;
+      let placed = null;
+      for (const side of [1, -1]) {
+        const y = o.y * z + side * (o.r * z + 3 + H / 2);
+        const box = { x1: o.x * z - W / 2, x2: o.x * z + W / 2, y1: y - H / 2, y2: y + H / 2 };
+        if (!taken.some((t) => box.x1 < t.x2 && box.x2 > t.x1 && box.y1 < t.y2 && box.y2 > t.y1)) {
+          placed = box;
+          break;
+        }
+      }
+      if (!placed) {
+        cap.addClass('cap-hidden');
+        return;
+      }
+      taken.push(placed);
+      cap.removeClass('cap-hidden');
+      cap.position({ x: o.x, y: (placed.y1 + placed.y2) / 2 / z });
+      cap.data({ cfs: 11 / z, cpad: 2 / z });
     });
   }
 
@@ -1130,22 +1337,28 @@ class App {
   refreshClusterFocus() {
     const cy = this.cy;
     cy.batch(() => {
-      const cards = cy.nodes().not('.group, .lane, .bubble');
+      const cards = cy.nodes().not('.group, .lane, .cl');
       const focused = this.state.selected || this.state.selectedEdge ? cards.not('.faded') : cy.collection();
+      this.clusterFocus = focused.nonempty();
       cards.not(focused).addClass('clustered');
       focused.removeClass('clustered');
-      cy.elements('.bubble, .cluster-edge').removeClass('faded hl').toggleClass('cluster-dim', focused.nonempty());
+      cy.elements('.cl').removeClass('faded hl').toggleClass('cluster-dim', this.clusterFocus);
       // The chain keeps a readable width on screen however far out the zoom is.
       const z = cy.zoom();
       cy.elements('.cl-chain').removeClass('cl-chain');
       focused.addClass('cl-chain').data('cp', 5 / z);
-      cy.edges('.hl').addClass('cl-chain').data('zw', 2.4 / z);
+      cy.edges('.hl').not('.cl').addClass('cl-chain').data('zw', 2.4 / z);
     });
   }
 
-  /** Zoom into a cluster: far enough for its cards to show, its top first if it is taller than the screen. */
+  /** Zoom into a cluster: a group far enough for its cards to show; merged groups to where they split. */
   zoomIntoCluster(node) {
-    this.fitTo(this.cy.getElementById('group:' + node.data('group')), true, 1.1, CLUSTER_ZOOM.leave + 0.06);
+    const members = node.data('members');
+    this.fitTo(this.groupBoxes(members), true, 1.1, members.length === 1 ? CLUSTER_ZOOM.leave + 0.06 : 0);
+  }
+
+  groupBoxes(groups) {
+    return this.cy.collection(groups.map((g) => this.cy.getElementById('group:' + g)));
   }
 
   /** Clusters on or off (View menu); remembered. */
@@ -1303,7 +1516,7 @@ class App {
     if (msg.action === 'lens') this.setSecLens(msg.on);
     if (msg.action === 'tab') this.setTab(msg.tab);
     reply({
-      cards: this.cy.nodes().not('.lane, .group, .bubble').length,
+      cards: this.cy.nodes().not('.lane, .group, .cl').length,
       selected: this.state.selected ?? null,
       tab: this.state.tab,
       secLens: Boolean(this.state.secLens),
@@ -1496,7 +1709,7 @@ class App {
 
   bind() {
     const cy = this.cy;
-    const isCard = (n) => !n.hasClass('lane') && !n.hasClass('group') && !n.hasClass('bubble');
+    const isCard = (n) => !n.hasClass('lane') && !n.hasClass('group') && !n.hasClass('cl');
     cy.on('tap', 'node', (e) => {
       if (isCard(e.target)) this.select(e.target.id());
       else if (e.target.hasClass('bubble')) this.zoomIntoCluster(e.target);
@@ -1504,7 +1717,7 @@ class App {
     cy.on('tap', 'edge', (e) => {
       const edge = e.target;
       if (edge.hasClass('cluster-edge')) {
-        this.fitTo(cy.collection(edge.connectedNodes().map((n) => cy.getElementById('group:' + n.data('group')))), true, 1.1);
+        this.fitTo(this.groupBoxes([...edge.source().data('members'), ...edge.target().data('members')]), true, 1.1);
         return;
       }
       this.state.selected = null;
@@ -1512,7 +1725,7 @@ class App {
       cy.batch(() => {
         cy.elements().removeClass('faded hl focus');
         const ends = edge.connectedNodes();
-        cy.elements().not(ends.union(ends.ancestors()).union(edge)).not('.lane, .group, .bubble, .cluster-edge').addClass('faded');
+        cy.elements().not(ends.union(ends.ancestors()).union(edge)).not('.lane, .group, .cl').addClass('faded');
         edge.addClass('hl');
       });
       this.setTab('inspect');
@@ -1534,7 +1747,10 @@ class App {
       const p = e.renderedPosition;
       this.tipTimer = setTimeout(() => this.showTooltipHtml(html(), p), 120);
     };
-    cy.on('mouseover', 'node.bubble', (e) => hoverTip(e, () => clusterTooltipHtml(this, e.target)));
+    cy.on('mouseover', 'node.bubble', (e) => {
+      e.target.connectedEdges().addClass('hover-hl');
+      hoverTip(e, () => clusterTooltipHtml(this, e.target));
+    });
     cy.on('mouseover', 'edge.cluster-edge', (e) => hoverTip(e, () => clusterEdgeTooltipHtml(this, e.target)));
     cy.on('mousemove', 'edge.cluster-edge', (e) => this.moveTooltip(e.renderedPosition));
     cy.on('mouseout', 'node.bubble, edge.cluster-edge', (e) => {
@@ -1814,7 +2030,7 @@ async function main() {
   await app.render();
   if (!graph.nodes.length) $('#nothing-found').hidden = false;
   else app.onboarding();
-  postToHost({ type: 'ready', cards: app.cy.nodes().not('.lane, .group, .bubble').length });
+  postToHost({ type: 'ready', cards: app.cy.nodes().not('.lane, .group, .cl').length });
   // When the first frame of the map has been drawn (the extension's timing tests compare the two).
   const readyAt = performance.now();
   requestAnimationFrame(() => setTimeout(() => postToHost({ type: 'painted', ms: Math.round(performance.now() - readyAt) }), 0));

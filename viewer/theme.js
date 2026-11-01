@@ -110,7 +110,7 @@ const dark = {
   select: '#ededf0',
   lanes: { be: '#ff5d4a', ep: '#f2b54a', fe: '#7aa7ff' },
   laneAlpha: 0.055,
-  bubbleAlpha: 0.3,
+  bubbleMix: 0.2,
   edges: { imports: '#4a4b56', uses: '#4a4b56', calls: '#6f9dff', renders: '#b48cff', http: '#f2b54a', handles: '#ff6a55' },
   methods: { GET: '#3ecf8e', HEAD: '#3ecf8e', POST: '#6f9dff', PUT: '#f2b54a', PATCH: '#f2b54a', DELETE: '#ff6a55', ANY: '#b48cff', OPTIONS: '#b48cff', '?': '#9097a9' },
   // Security lens. No green: a restriction being declared is not the same as "safe".
@@ -158,7 +158,7 @@ const light = {
   select: '#18181b',
   lanes: { be: '#e0442f', ep: '#c7851a', fe: '#2f6fde' },
   laneAlpha: 0.06,
-  bubbleAlpha: 0.2,
+  bubbleMix: 0.2,
   edges: { imports: '#bcbcc4', uses: '#bcbcc4', calls: '#2f6fde', renders: '#8a4fd8', http: '#d08a12', handles: '#e0442f' },
   methods: { GET: '#13915f', HEAD: '#13915f', POST: '#2f6fde', PUT: '#c7851a', PATCH: '#c7851a', DELETE: '#e0442f', ANY: '#8a4fd8', OPTIONS: '#8a4fd8', '?': '#646a79' },
   security: { authorization: '#6a4fd8', authenticated: '#2f6fde', signed: '#0f8f89', public: '#6b7385', unknown: '#c7851a', none: '#e0442f' },
