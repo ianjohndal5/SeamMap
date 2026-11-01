@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { findProjects, readTsPaths, resolveRoots } from '../src/detect.js';
+import { findProjects, resolveRoots } from '../src/detect.js';
+import { readTsPaths } from '../src/lang/js/tsconfig.js';
 import { parseJsonc } from '../src/util/jsonc.js';
 
 const fixtures = path.resolve(__dirname, '..', 'fixtures');

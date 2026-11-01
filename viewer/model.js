@@ -1,6 +1,7 @@
 // Indexes over graph.json plus naming, sizing and search helpers (no DOM, no Cytoscape).
 
 import { BADGE_W, TAB_W } from './icons.js';
+import { isOwnHandler } from './theme.js';
 
 export function feCategory(n) {
   const k = n.nextKind;
@@ -15,7 +16,7 @@ export function feCategory(n) {
 }
 
 export function groupKey(n) {
-  if (n.kind === 'endpoint') return n.server === 'next' ? 'ep:next' : 'ep:laravel';
+  if (n.kind === 'endpoint') return isOwnHandler(n) ? 'ep:next' : 'ep:laravel';
   if (n.kind === 'unmatched') return 'ep:unmatched';
   if (n.side === 'backend') return 'be:' + (n.role || 'other');
   return 'fe:' + feCategory(n);
@@ -125,7 +126,7 @@ export const locationOf = (n) => (n?.file ? n.file + (n.line ? ':' + n.line : ''
 
 export function editorUrl(n, meta) {
   if (!n || !n.file) return null;
-  const root = n.side === 'backend' || n.server === 'laravel' ? meta.backendRoot : meta.frontendRoot;
+  const root = n.side === 'backend' || (n.kind === 'endpoint' && !isOwnHandler(n)) ? meta.backendRoot : meta.frontendRoot;
   if (!root) return null;
   const abs = root.replace(/\/$/, '') + '/' + n.file;
   // vscode://file/<absolute path>:<line> — "/home/x" -> "vscode://file/home/x", "C:/x" -> "vscode://file/C:/x".

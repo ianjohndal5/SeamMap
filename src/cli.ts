@@ -146,13 +146,19 @@ async function main(): Promise<void> {
   const lookup: ConfigLookup = opts.config
     ? { file: path.resolve(cwd, opts.config), how: 'given with --config', searched: [], others: [] }
     : findConfig(starts);
-  const { config } = lookup.file ? loadConfig(lookup.file, cwd) : { config: defaultConfig() };
-  const warnings: string[] = [];
+  const loaded = lookup.file ? loadConfig(lookup.file, cwd) : { config: defaultConfig(), warnings: [] };
+  const config = loaded.config;
+  const warnings: string[] = [...loaded.warnings];
   for (const other of lookup.others) warnings.push(`Also found ${other}, not used (see "config" above; pass --config to choose).`);
+  const fromConfig = lookup.file ? `"backend" in ${path.basename(lookup.file)}` : undefined;
   const roots = resolveRoots({
     backend: named.backend ?? config.backend,
     frontend: named.frontend ?? config.frontend,
     root: named.root,
+    origin: {
+      ...(named.backend ? {} : { backend: fromConfig }),
+      ...(named.frontend ? {} : { frontend: fromConfig?.replace('"backend"', '"frontend"') }),
+    },
   });
   warnings.push(...roots.warnings);
 
@@ -168,9 +174,15 @@ async function main(): Promise<void> {
   }
 
   const outDir = path.resolve(cwd, opts.out);
-  fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, 'graph.json');
-  fs.writeFileSync(outFile, JSON.stringify(graph, null, 1));
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(outFile, JSON.stringify(graph, null, 1));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    const why = code === 'EEXIST' || code === 'ENOTDIR' ? 'a file is in the way of that folder' : code === 'EACCES' || code === 'EPERM' ? 'permission denied' : (e as Error).message;
+    throw new Error(`Could not write ${outFile}: ${why}. Choose another folder with --out.`);
+  }
   printSummary(graph, outFile, lookup, cwd);
 
   if (opts.jsonOnly || opts.list) return;

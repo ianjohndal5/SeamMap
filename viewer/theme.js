@@ -17,7 +17,8 @@ export const GROUPS = {
   'be:provider': { label: 'Providers', icon: 'provider' },
   'be:other': { label: 'Other PHP', icon: 'php' },
   'be:model': { label: 'Models', icon: 'model' },
-  // Endpoints
+  // Endpoints. The keys name roles: 'ep:laravel' = the backend's routes, 'ep:next' = the frontend's own handlers
+  // (labels from setFrameworks).
   'ep:laravel': { label: 'Laravel routes', icon: 'endpoint' },
   'ep:next': { label: 'Next.js handlers', icon: 'lambda' },
   'ep:unmatched': { label: 'Unmatched calls', icon: 'alert' },
@@ -40,6 +41,27 @@ export const LANES = {
   ep: { title: 'Endpoints', sub: 'HTTP routes' },
   fe: { title: 'Next.js', sub: 'frontend' },
 };
+
+/** The analyzed frameworks, from graph.meta.frameworks (files written before 1.2 have none: Laravel + Next.js). */
+const FRAMEWORKS = { backend: { id: 'laravel', name: 'Laravel', language: 'PHP' }, frontend: { id: 'next', name: 'Next.js', language: 'JS/TS' } };
+
+/** Name lanes and endpoint groups after the analyzed frameworks. Called once, before anything renders. */
+export function setFrameworks(frameworks) {
+  for (const side of ['backend', 'frontend']) if (frameworks?.[side]) FRAMEWORKS[side] = frameworks[side];
+  LANES.be.title = FRAMEWORKS.backend.name;
+  LANES.fe.title = FRAMEWORKS.frontend.name;
+  GROUPS['ep:laravel'].label = `${FRAMEWORKS.backend.name} routes`;
+  GROUPS['ep:next'].label = `${FRAMEWORKS.frontend.name} handlers`;
+}
+
+/** Display name of the framework on a side ('backend' | 'frontend'). */
+export const frameworkName = (side) => FRAMEWORKS[side].name;
+
+/** The language of a side's source files ("PHP"). */
+export const languageOf = (side) => FRAMEWORKS[side].language;
+
+/** Is this endpoint one of the frontend's own route handlers (rather than a backend route)? */
+export const isOwnHandler = (n) => n.server === FRAMEWORKS.frontend.id;
 
 /**
  * ELK partition (with direction LEFT, partition 0 is the rightmost band). Each band

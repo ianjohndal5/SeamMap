@@ -5,6 +5,17 @@ import type { SecurityReport } from './security/types.js';
 
 export type Side = 'backend' | 'frontend';
 
+/** The frameworks the analyzer supports (src/frameworks.ts); the `server` of an endpoint. */
+export type FrameworkId = 'laravel' | 'next';
+
+/** A framework in graph.meta.frameworks. */
+export interface FrameworkInfo {
+  id: FrameworkId;
+  name: string;
+  /** The language of its source files ("PHP", "JS/TS"). */
+  language: string;
+}
+
 export interface AnalyzeOptions {
   /** Laravel project root, or null. */
   backend: string | null;
@@ -58,7 +69,7 @@ export interface GraphNode {
   /** File parsed with syntax errors (results are best-effort). */
   parseError?: boolean;
   // Endpoint fields
-  server?: 'laravel' | 'next';
+  server?: FrameworkId;
   method?: string;
   path?: string;
   pattern?: string;
@@ -129,6 +140,8 @@ export interface Graph {
     version: string;
     backendRoot: string | null;
     frontendRoot: string | null;
+    /** The framework analyzed on each side (src/frameworks.ts), or null when that side was not analyzed. */
+    frameworks: { backend: FrameworkInfo | null; frontend: FrameworkInfo | null };
     /**
      * The config file used, or null for the defaults. `path` is relative to the backend root (the frontend root
      * without a backend), with / separators; `sha256` hashes its parsed settings, so comments, formatting and
@@ -189,7 +202,7 @@ export interface HttpCall {
 
 export interface Endpoint {
   id: string;
-  server: 'laravel' | 'next';
+  server: FrameworkId;
   methods: string[];
   /** Display path, e.g. /api/users/{user} or /api/users/[id]. */
   path: string;

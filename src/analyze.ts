@@ -1,12 +1,11 @@
 import path from 'node:path';
 import type { Adapter } from './adapter.js';
 import { GraphBuilder } from './graph.js';
-import { NextAdapter } from './lang/js/index.js';
-import { LaravelAdapter } from './lang/php/index.js';
+import { frameworkFor } from './frameworks.js';
 import { link } from './link.js';
 import { SCHEMA_VERSION } from './schema.js';
 import { analyzeSecurity } from './security/index.js';
-import type { AnalyzeOptions, Graph, Stats, Timings } from './types.js';
+import type { AnalyzeOptions, Graph, Side, Stats, Timings } from './types.js';
 import { toPosix } from './util/paths.js';
 import { VERSION } from './brand.js';
 
@@ -41,22 +40,35 @@ export function analyze(opts: AnalyzeOptions): AnalyzeResult {
   const timings: Timings = { scan: 0, parse: 0, extract: 0, resolve: 0, link: 0 };
   const graph = new GraphBuilder({ ranges: Boolean(opts.security) });
 
+  const projects = (['backend', 'frontend'] as const)
+    .filter((side) => opts[side])
+    .map((side) => ({ root: opts[side]!, framework: frameworkFor(side, opts[side]!) }));
+
   // When one project lives inside the other (monorepo), keep their files apart.
-  if (opts.backend && opts.frontend) {
-    const inner = path.relative(opts.frontend, opts.backend);
-    if (inner && !inner.startsWith('..') && !path.isAbsolute(inner)) config.next.exclude.push(`${toPosix(inner)}/**`);
-    const inner2 = path.relative(opts.backend, opts.frontend);
-    if (inner2 && !inner2.startsWith('..') && !path.isAbsolute(inner2)) config.laravel.exclude.push(`${toPosix(inner2)}/**`);
+  for (const outer of projects) {
+    for (const inner of projects) {
+      const rel = path.relative(outer.root, inner.root);
+      // Escaped: exclude patterns are .gitignore syntax, where #, !, [ ... in a folder name mean something.
+      if (inner !== outer && rel && !rel.startsWith('..') && !path.isAbsolute(rel)) outer.framework.exclude(config).push(`${toPosix(rel).replace(/[\\[\]*?!#]/g, '\\$&')}/**`);
+    }
   }
 
-  const adapters: Adapter[] = [];
+  const frameworkRecord = (side: Side) => {
+    const f = projects.find((p) => p.framework.side === side)?.framework;
+    return f ? { id: f.id, name: f.name, language: f.language } : null;
+  };
+
   const keepSyntax = Boolean(opts.security);
-  if (opts.backend) adapters.push(new LaravelAdapter(opts.backend, config, warnings, { keepSyntax }));
-  if (opts.frontend) adapters.push(new NextAdapter(opts.frontend, config, warnings, { keepSyntax }));
+  const adapters: Adapter[] = projects.map(({ root, framework }) => framework.createAdapter(root, config, warnings, { keepSyntax }));
 
   for (const stage of ['scan', 'parse', 'extract', 'resolve'] as const) {
     opts.onStage?.(stage);
     for (const a of adapters) timed(timings, stage, () => (stage === 'resolve' ? a.resolve(graph) : a[stage]()));
+  }
+
+  for (const [i, a] of adapters.entries()) {
+    const { framework, root } = projects[i]!;
+    if (!a.stats.files) warnings.push(`${a.side}: no ${framework.language} files to analyze in ${root}; check the path, and ${framework.id}.include / ${framework.id}.exclude if a config file sets them.`);
   }
 
   const endpoints = adapters.flatMap((a) => a.endpoints);
@@ -68,7 +80,7 @@ export function analyze(opts: AnalyzeOptions): AnalyzeResult {
       backendEnvVars: config.next.backendEnvVars,
       backendHosts: config.next.backendHosts,
       ...(config.next.backendBasePath !== undefined ? { backendBasePath: config.next.backendBasePath } : {}),
-    }, { backend: Boolean(opts.backend), frontend: Boolean(opts.frontend) });
+    }, { backend: projects.find((p) => p.framework.side === 'backend')?.framework ?? null, frontend: projects.find((p) => p.framework.side === 'frontend')?.framework ?? null });
   });
 
   const { nodes, edges } = graph.sorted();
@@ -105,6 +117,7 @@ export function analyze(opts: AnalyzeOptions): AnalyzeResult {
       version: VERSION,
       backendRoot: opts.backend ? toPosix(opts.backend) : null,
       frontendRoot: opts.frontend ? toPosix(opts.frontend) : null,
+      frameworks: { backend: frameworkRecord('backend'), frontend: frameworkRecord('frontend') },
       config: configRecord(config, opts.backend ?? opts.frontend),
       generatedAt: new Date().toISOString(),
       durationMs: Math.round(performance.now() - started),

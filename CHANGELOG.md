@@ -12,6 +12,55 @@ with **Breaking:**.
 
 ## [Unreleased]
 
+### Added
+
+- `meta.frameworks` in `graph.json`: the framework analyzed on each side (`id`, `name`, `language`), or `null`. The
+  viewer names its lanes, endpoint groups and file languages from it.
+- `nextKind: "proxy"` for Next.js 16's `proxy.ts`, like `middleware.ts`.
+- `loadConfig()` returns `warnings` (unknown keys), and `resolveRoots()` takes an optional `origin` for its error
+  messages. `FrameworkId` and `FrameworkInfo` types.
+- `docs/ARCHITECTURE.md`: how the pipeline works and how to add a framework.
+
+### Changed
+
+- Frameworks plug in through one registry (`src/frameworks.ts`): detection, the pipeline and the link stage no
+  longer name Laravel or Next.js. Output is unchanged.
+- Viewer: text colours meet WCAG AA contrast in both themes; the panel's tabs shrink to icons when they don't fit;
+  narrow windows start with the panel closed; larger GET/POST badges on endpoint cards.
+- Config files: an unknown key is a warning with the closest known key; a file or section of the wrong type, or an
+  `include` pattern outside the project, is an error that names the file and the key.
+- Monorepo detection counts a folder as a Next.js app only with `next` as a dependency and `app/`, `pages/` or a
+  `next.config` file, so libraries that build on Next no longer make it ambiguous.
+
+### Fixed
+
+- Symbolic links are no longer followed: a link loop made the scan hang, and links out of the project were read.
+- An unreadable folder anywhere in a project (a Docker volume, a path too long) no longer stops the run.
+- Route files in modules and packages (`modules/Blog/Routes/web.php`) and routes registered by any service provider
+  or with `loadRoutesFrom()` are read; they were missing, or reported as "not found or not scanned".
+- A `require` of a non-route file in `bootstrap/app.php` is no longer reported as a missing route file.
+- A route file nested too deeply to read is reported instead of stopping the run.
+- The Security tab and the Lens button no longer show for graphs without the security lens; the Filters tab no
+  longer shifts the panel sideways; a graph with nothing in it explains what was scanned.
+- A project nested in the other with `#`, `!` or `[` in its folder name is kept apart from it.
+- The same folder given as backend and frontend through a link is caught.
+- Clearer messages: an unreadable `composer.json` or `.gitignore`, a project path from the config file that doesn't
+  exist, an output folder that can't be written, a side with no files to analyze.
+- PHP method lookup is no longer quadratic on very large classes.
+
+### Results may differ
+
+- `.gitignore` files of the folders above the project, up to the repository root, apply now, as in git (unless they
+  ignore the analyzed folder itself), so files they ignore are no longer analyzed.
+- Laravel routes in modules' and packages' route folders, and routes loaded by service providers, appear on the map.
+- A non-literal route prefix is kept as a `{prefix}` segment instead of being dropped, so those routes' paths and
+  ids change, and frontend calls can match them.
+- Two Laravel routes that differ only in parameter names: the map keeps the first (as Laravel matches) instead of
+  the last.
+- `tsconfig` path aliases into folders outside the project (a monorepo's packages) count as external imports, not
+  unresolved ones.
+- PHP files over 2 MB are skipped without counting as parse errors, as on the frontend.
+
 ## [1.0.0] - 2026-10-25
 
 First public release.

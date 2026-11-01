@@ -3,7 +3,7 @@
 import { icon } from './icons.js';
 import { inWebview } from './host.js';
 import { descendants, displayName, editorUrl, groupKey, iconOf, locationOf } from './model.js';
-import { GROUPS, GROUP_ORDER, LANES, SEC_LABEL, SEC_STATES, laneOf, methodBadge, methodColor } from './theme.js';
+import { GROUPS, GROUP_ORDER, LANES, SEC_LABEL, SEC_STATES, frameworkName, isOwnHandler, languageOf, laneOf, methodBadge, methodColor } from './theme.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -12,10 +12,10 @@ const fmt = (n) => (n ?? 0).toLocaleString('en-US');
 /** Human label for what a node is. */
 export function kindLabel(M, n) {
   if (!n) return '';
-  if (n.kind === 'endpoint') return n.server === 'next' ? 'Next.js route handler' : 'Laravel route';
+  if (n.kind === 'endpoint') return isOwnHandler(n) ? `${frameworkName('frontend')} route handler` : `${frameworkName('backend')} route`;
   if (n.kind === 'unmatched') return 'Unmatched HTTP call';
   const g = GROUPS[groupKey(M.byId.get(M.topOf.get(n.id)) ?? n)];
-  if (n.kind === 'file') return `${n.side === 'backend' ? 'PHP' : 'JS/TS'} file · ${g?.label ?? ''}`;
+  if (n.kind === 'file') return `${languageOf(n.side === 'backend' ? 'backend' : 'frontend')} file · ${g?.label ?? ''}`;
   const kind = { method: 'Method', function: 'Function', class: 'Class', interface: 'Interface', trait: 'Trait', enum: 'Enum', closure: 'Route closure' }[n.kind] ?? n.kind;
   return `${kind} · ${g?.label ?? ''}`;
 }
@@ -113,8 +113,33 @@ export function suggestedStart(app) {
   return best ? { id: best.id, why: `Most connected endpoint: its handler makes ${best.calls} call${best.calls === 1 ? '' : 's'}` } : null;
 }
 
+/** What each framework's scan covers (README: Detection and scanning rules), for the nothing-found state. */
+const SCANNED = {
+  laravel: ': the PSR-4 folders from <code>composer.json</code> (normally <code>app/</code>) and <code>routes/</code>',
+  next: ': every <code>.js</code>, <code>.ts</code>, <code>.jsx</code> and <code>.tsx</code> file outside <code>node_modules</code>, build output and <code>.gitignore</code>d paths',
+};
+
+/** The Inspect tab when the analysis found nothing to draw: say what was scanned and what to check. */
+function renderNothingFound(app) {
+  const { meta } = app;
+  const roots = [
+    meta.backendRoot && `<li>${esc(frameworkName('backend'))} backend <code>${esc(meta.backendRoot)}</code>${SCANNED[meta.frameworks?.backend?.id ?? 'laravel'] ?? ''}.</li>`,
+    meta.frontendRoot && `<li>${esc(frameworkName('frontend'))} frontend <code>${esc(meta.frontendRoot)}</code>${SCANNED[meta.frameworks?.frontend?.id ?? 'next'] ?? ''}.</li>`,
+  ].filter(Boolean);
+  return `
+    <div class="hero">
+      <div class="eyebrow">${icon('alert', 13)} Nothing to map</div>
+      <h2>No code was found</h2>
+      <p>${meta.stats.files ? `${fmt(meta.stats.files)} file${meta.stats.files === 1 ? ' was' : 's were'} read, but none had definitions or routes to draw.` : 'No source files were found where SeamMap looks.'} It scanned:</p>
+      <ul class="plain-list">${roots.join('')}</ul>
+      <p>Check that the path points at the project's root folder, and the <code>include</code> / <code>exclude</code> settings if a config file was used.</p>
+    </div>
+    ${meta.warnings.length ? section('Warnings', meta.warnings.map((w) => `<p class="note">${esc(w)}</p>`), { open: true }) : ''}`;
+}
+
 export function renderInspectEmpty(app) {
   const { M, meta } = app;
+  if (!M.graph.nodes.length) return renderNothingFound(app);
   const s = meta.stats;
   const endpoints = busiestEndpoints(M).slice(0, 7);
   const start = suggestedStart(app);
@@ -126,7 +151,7 @@ export function renderInspectEmpty(app) {
       <h2>Trace a request across the stack</h2>
       <p>${
         meta.backendRoot && meta.frontendRoot
-          ? 'Pick an endpoint to see which components call it and which Laravel code handles it.'
+          ? `Pick an endpoint to see which components call it and which ${esc(frameworkName('backend'))} code handles it.`
           : meta.backendRoot
             ? 'Pick a route to see the controller that handles it and everything that code calls.'
             : 'Pick an endpoint to see which components call it and what its handler does.'
@@ -148,15 +173,15 @@ export function renderInspectEmpty(app) {
           : ''
     }
     <div class="tiles tiles-3">
-      ${tile('Files', fmt(s.files), `${fmt(M.graph.nodes.filter((n) => n.kind === 'file' && n.side === 'backend').length)} PHP · ${fmt(M.graph.nodes.filter((n) => n.kind === 'file' && n.side === 'frontend').length)} JS/TS`)}
-      ${tile('Endpoints', fmt(s.endpoints), `${fmt(M.graph.nodes.filter((n) => n.kind === 'endpoint' && n.server === 'laravel').length)} Laravel · ${fmt(M.graph.nodes.filter((n) => n.kind === 'endpoint' && n.server === 'next').length)} Next`)}
+      ${tile('Files', fmt(s.files), `${fmt(M.graph.nodes.filter((n) => n.kind === 'file' && n.side === 'backend').length)} ${esc(languageOf('backend'))} · ${fmt(M.graph.nodes.filter((n) => n.kind === 'file' && n.side === 'frontend').length)} ${esc(languageOf('frontend'))}`)}
+      ${tile('Endpoints', fmt(s.endpoints), `${fmt(M.graph.nodes.filter((n) => n.kind === 'endpoint' && !isOwnHandler(n)).length)} ${esc(frameworkName('backend'))} · ${fmt(M.graph.nodes.filter((n) => n.kind === 'endpoint' && isOwnHandler(n)).length)} ${esc(frameworkName('frontend'))}`)}
       ${tile('Calls linked', s.httpCalls ? linked + '%' : '—', `${fmt(s.httpCalls - s.unmatchedHttpCalls)} of ${fmt(s.httpCalls)} HTTP calls`)}
     </div>
     ${
       endpoints.some((e) => e.callers)
         ? section('Busiest endpoints', endpoints.map(({ n, callers }) => nodeRow(app, n.id, { tag: `<span class="tag">${callers} caller${callers === 1 ? '' : 's'}</span>` })))
         : !meta.frontendRoot || !meta.backendRoot
-          ? `<div class="card"><div class="card-title">Only the ${meta.backendRoot ? 'Laravel backend' : 'Next.js frontend'} was analyzed</div><p class="muted small" style="margin:0">Run with both <code>--backend</code> and <code>--frontend</code> to link HTTP calls to endpoints. You can still explore ${meta.backendRoot ? 'routes, controllers and their calls' : 'pages, components and their calls'}.</p></div>`
+          ? `<div class="card"><div class="card-title">Only the ${esc(meta.backendRoot ? `${frameworkName('backend')} backend` : `${frameworkName('frontend')} frontend`)} was analyzed</div><p class="muted small" style="margin:0">Run with both <code>--backend</code> and <code>--frontend</code> to link HTTP calls to endpoints. You can still explore ${meta.backendRoot ? 'routes, controllers and their calls' : 'pages, components and their calls'}.</p></div>`
           : ''
     }
     ${
@@ -496,7 +521,7 @@ export function renderSecurity(app) {
         })
         .join('')}
       <div class="snippet-head"><span class="mono small">seammap.config.json</span><button class="icon-btn sm" data-copy="${esc(leadSnippet)}" title="Copy">${icon('copy', 13)}</button></div>
-      <pre class="snippet">${esc(leadSnippet)}</pre>
+      <pre class="snippet" tabindex="0">${esc(leadSnippet)}</pre>
       <p class="muted small">Move each name to the list that matches what it does. States change only once you classify them: SeamMap never decides from a name.</p>
     </div>`
     : '';
@@ -531,7 +556,7 @@ export function renderSecurity(app) {
       ),
       { open: unresolved.length > 0, empty: 'Nothing to classify.' },
     )}
-    ${snippet ? `<div class="card"><div class="card-title">seammap.config.json <button class="icon-btn sm" data-copy="${esc(snippet)}" title="Copy">${icon('copy', 13)}</button></div><p class="muted small">Move each entry to the list that matches what it does after reading it. The hints above are suggestions only.</p><pre class="snippet">${esc(snippet)}</pre></div>` : ''}
+    ${snippet ? `<div class="card"><div class="card-title">seammap.config.json <button class="icon-btn sm" data-copy="${esc(snippet)}" title="Copy">${icon('copy', 13)}</button></div><p class="muted small">Move each entry to the list that matches what it does after reading it. The hints above are suggestions only.</p><pre class="snippet" tabindex="0">${esc(snippet)}</pre></div>` : ''}
     ${renderFindingsBlock(app, sec)}
     ${section('Caveats', sec.caveats.map((c) => `<p class="note">${esc(c)}</p>`), { open: true, empty: 'None.' })}
     ${section('Not checked', sec.notChecked.map((c) => `<p class="note">${esc(c)}</p>`), { open: true })}`;
@@ -650,7 +675,7 @@ export function renderFilters(app) {
   };
   return `
     <div class="sec-static">
-      <h3>Relationships</h3>
+      <h2>Relationships</h2>
       ${kinds
         .map(
           ([k, label, count]) => `<label class="switch-row">
@@ -667,7 +692,7 @@ export function renderFilters(app) {
       </label>
     </div>
     <div class="sec-static">
-      <h3>Groups</h3>
+      <h2>Groups</h2>
       <p class="muted small">Hidden groups are removed from the layout.</p>
       ${laneSection('be')}${laneSection('ep')}${laneSection('fe')}
     </div>`;

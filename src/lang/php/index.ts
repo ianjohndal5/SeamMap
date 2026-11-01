@@ -2,15 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type Adapter, countReason, emptyStats } from '../../adapter.js';
 import type { CodemapConfig } from '../../config.js';
-import { type ComposerInfo, readComposer } from '../../detect.js';
+import { type ComposerInfo, readComposer } from './composer.js';
 import { withEndLine, type GraphBuilder } from '../../graph.js';
 import { laravelPattern, patternKey } from '../../match/url.js';
 import { type ParsedFile, type SyntaxNode, parseFile, parseSource, readSource } from '../../parse.js';
-import { scanLaravel } from '../../scan.js';
+import { scanLaravel } from './scan.js';
 import type { Endpoint, GraphNode, HttpCall } from '../../types.js';
 import { endLineOf, extractPhp, type PhpClass, type PhpFileInfo, type PhpFunction, type PhpOwner } from './extract.js';
 import { phpString } from './names.js';
-import { type LaravelRouteExtractor, type RawRoute, extractRoutes, joinUri } from './routes.js';
+import { type LaravelRouteExtractor, type RawRoute, extractRoutes, isRouteFile, joinUri } from './routes.js';
 
 /** Fluent-chain calls (`User::query()->latest()`) are reported but not counted as unresolved. */
 const NOT_COUNTED = new Set(['chained-call']);
@@ -66,7 +66,7 @@ export class LaravelAdapter implements Adapter {
 
   scan(): void {
     this.composer = readComposer(this.root, this.warnings);
-    this.files = scanLaravel(this.root, this.composer, this.config);
+    this.files = scanLaravel(this.root, this.composer, this.config, this.warnings);
   }
 
   parse(): void {
@@ -76,7 +76,7 @@ export class LaravelAdapter implements Adapter {
         this.parsed.set(rel, r.file);
         if (r.file.hasError) this.stats.parseErrors++;
       } else {
-        this.stats.parseErrors++;
+        if (!r.skipped) this.stats.parseErrors++;
         this.warnings.push(`backend: skipped ${rel} (${r.reason})`);
       }
     }
@@ -116,7 +116,9 @@ export class LaravelAdapter implements Adapter {
     // 1. Routes: route files, route service providers and bootstrap/app.php can register routes.
     const trees = new Map<string, SyntaxNode>();
     for (const [rel, f] of this.parsed) {
-      if (rel.startsWith('routes/') || rel.endsWith('Providers/RouteServiceProvider.php')) trees.set(rel, f.tree.rootNode);
+      // Route files (the app's routes/ and modules' Routes/ folders), and service providers that register routes.
+      const registrar = rel.endsWith('ServiceProvider.php') && /\bRoute::|->loadRoutesFrom\(/.test(f.source);
+      if (isRouteFile(rel) || registrar) trees.set(rel, f.tree.rootNode);
     }
     if (this.bootstrap) trees.set('bootstrap/app.php', this.bootstrap);
     const extractor = extractRoutes(trees, { controllerNamespace: this.controllerNamespace(), apiPrefix: this.apiPrefix() });
@@ -220,9 +222,17 @@ export class LaravelAdapter implements Adapter {
       return inPsr4File ?? classes.get(lower)?.cls ?? null;
     };
     this.findClass = findClass;
+    // PHP method names are case-insensitive; one index per class (a linear search per call is quadratic on big classes).
+    const methodIndex = new Map<PhpClass, Map<string, string>>();
     const methodId = (cls: PhpClass, name: string): string | null => {
-      const m = cls.methods.find((x) => x.name.toLowerCase() === name.toLowerCase());
-      return m ? `${cls.id}::${m.name}` : null;
+      let index = methodIndex.get(cls);
+      if (!index) {
+        index = new Map();
+        for (const m of cls.methods) if (!index.has(m.name.toLowerCase())) index.set(m.name.toLowerCase(), m.name);
+        methodIndex.set(cls, index);
+      }
+      const found = index.get(name.toLowerCase());
+      return found ? `${cls.id}::${found}` : null;
     };
 
     // Edges.
@@ -292,8 +302,10 @@ export class LaravelAdapter implements Adapter {
       }
     }
 
-    // Endpoints. Laravel keeps the last registration of a method+URI, so later routes win.
+    // Endpoints, as Laravel's router keeps them: a second registration of the same method and URI replaces the first;
+    // URIs that differ only in parameter names ({id}, {slug}) both stay registered and the first one matches first.
     const byId = new Map<string, Endpoint>();
+    const kept = new Map<string, RawRoute>();
     for (const r of this.routes) {
       const segs = laravelPattern(r.uri);
       const methods = r.methods;
@@ -319,9 +331,20 @@ export class LaravelAdapter implements Adapter {
         graph.diagnose('backend', r.file, 'unsupported route action', r.line, r.action.text);
       }
       if (!handler) this.stats.unresolvedHandlers++;
+      const earlier = kept.get(id);
+      if (earlier && earlier.uri !== r.uri) {
+        this.warnings.push(
+          `backend: route ${methods.join('|')} ${r.uri} (${r.file}:${r.line}) has the same pattern as ${earlier.uri} (${earlier.file}:${earlier.line}); Laravel tries the first one first, so the map shows that one (where() constraints are not read)`,
+        );
+        continue;
+      }
+      if (earlier) {
+        this.warnings.push(`backend: route ${methods.join('|')} ${r.uri} is defined more than once; the last definition wins (${r.file}:${r.line})`);
+        earlier.endpointId = undefined;
+      }
       r.endpointId = id;
       r.handlerId = handler;
-      if (byId.has(id)) this.warnings.push(`backend: route ${methods.join('|')} ${r.uri} is defined more than once; the last definition wins (${r.file}:${r.line})`);
+      kept.set(id, r);
       byId.set(id, { id, server: 'laravel', methods, path: r.uri, file: r.file, line: r.line, handler, handlerCertain });
     }
     for (const issue of this.routeExtractor?.issues ?? []) {

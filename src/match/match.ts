@@ -108,8 +108,10 @@ function bestMatches(call: NormalizedCall, method: string | null, eps: Patterned
 export function matchCall(
   call: NormalizedCall,
   method: string | null,
-  laravel: PatternedEndpoint[],
-  next: PatternedEndpoint[],
+  /** The backend's routes. */
+  backend: PatternedEndpoint[],
+  /** The frontend's own route handlers (Next.js route handlers), which relative URLs reach first. */
+  own: PatternedEndpoint[],
 ): MatchResult | null {
   const verdict = (found: { ep: PatternedEndpoint; fuzzy: boolean }[], baseCertain: boolean, via?: string): MatchResult => ({
     endpoints: found.map((f) => f.ep),
@@ -119,23 +121,23 @@ export function matchCall(
   });
   switch (call.target) {
     case 'backend': {
-      const found = bestMatches(call, method, laravel, false);
+      const found = bestMatches(call, method, backend, false);
       return found.length ? verdict(found, true) : null;
     }
     case 'relative': {
-      const nx = bestMatches(call, method, next, false);
+      const nx = bestMatches(call, method, own, false);
       if (nx.length) return verdict(nx, true);
-      const lv = bestMatches(call, method, laravel, false);
+      const lv = bestMatches(call, method, backend, false);
       return lv.length ? verdict(lv, false, 'relative') : null;
     }
     case 'suffix': {
-      const lv = bestMatches(call, method, laravel, true);
+      const lv = bestMatches(call, method, backend, true);
       if (lv.length) return verdict(lv, false, 'suffix');
-      const nx = bestMatches(call, method, next, true);
+      const nx = bestMatches(call, method, own, true);
       return nx.length ? verdict(nx, false, 'suffix') : null;
     }
     case 'external': {
-      const lv = bestMatches(call, method, laravel, false);
+      const lv = bestMatches(call, method, backend, false);
       return lv.length ? verdict(lv, false, 'external') : null;
     }
   }

@@ -1,11 +1,11 @@
 import path from 'node:path';
 import { type Adapter, countReason, emptyStats } from '../../adapter.js';
 import type { CodemapConfig } from '../../config.js';
-import { readTsPaths } from '../../detect.js';
+import { readTsPaths } from './tsconfig.js';
 import { withEndLine, type GraphBuilder } from '../../graph.js';
 import { nextPattern, patternKey } from '../../match/url.js';
 import { type ParsedFile, parseFile } from '../../parse.js';
-import { scanNext } from '../../scan.js';
+import { scanNext } from './scan.js';
 import type { Endpoint, GraphNode, HttpCall, UrlPart } from '../../types.js';
 import { extractJs, type JsFileInfo, type TopBinding } from './extract.js';
 import { nextFileInfo, ROUTE_HANDLER_METHODS } from './next.js';
@@ -47,7 +47,7 @@ export class NextAdapter implements Adapter {
   ) {}
 
   scan(): void {
-    this.files = scanNext(this.root, this.config);
+    this.files = scanNext(this.root, this.config, this.warnings);
   }
 
   parse(): void {

@@ -99,7 +99,7 @@ seammap <monorepoRoot> [options]
 * **Monorepo mode:** `seammap <root>` searches `<root>` and its subdirectories (3 levels deep, skipping `node_modules`, `vendor`, dot-directories and similar) for a Laravel project (`composer.json` + `artisan`) and a Next.js project (`package.json` with a `next` dependency). If it finds several candidates of one kind, or none at all, it stops and asks for `--backend` / `--frontend`.
 * **One side only:** `--backend` alone or `--frontend` alone works; a warning says the other side is missing.
 * **Robustness:** a missing path, failed detection or an unparseable config file gives a clear error and exit code 1. An unreadable or unparseable source file never stops the run: it is logged, counted in `parseErrors`, and analysis continues. A missing `composer.json` (default `App\ => app/`) or `tsconfig.json` (no path aliases) only produces a warning.
-* **Exit codes:** `0` when the analysis ran (whatever it found, security findings included), `1` on any error: invalid arguments or config, no project found, unreadable paths. With `--json-only` the command writes `graph.json`, prints the summary and exits, which makes it usable in scripts; a future CI mode can add codes of its own without changing these.
+* **Exit codes:** `0` when the analysis ran (whatever it found, security findings included), `1` on any error: invalid arguments or config, no project found, a project path that doesn't exist, an output folder that can't be written. Problems inside a project (unreadable files and folders, SARIF files that can't be read) are warnings, not errors. With `--json-only` the command writes `graph.json`, prints the summary and exits, which makes it usable in scripts; a future CI mode can add codes of its own without changing these.
 
 ### Viewer controls
 
@@ -129,7 +129,7 @@ The side panel has three tabs (four with `--security`):
 
 ## Configuration (`seammap.config.json`)
 
-The config file is optional. Comments and trailing commas are allowed, and relative paths resolve against the config file's own directory. Command-line flags override `backend`/`frontend`.
+The config file is optional. Comments and trailing commas are allowed, and relative paths resolve against the config file's own directory. Command-line flags override `backend`/`frontend`. A value of the wrong type, or a file that isn't a JSON object, is an error that names the file and the key; an unknown key (a typo, or a setting of a newer version) is a warning with the closest known key. `include` patterns are relative to the project and can't reach outside it.
 
 **Which file is used** does not depend on where you run the command:
 1. `--config <file>`, when given.
@@ -188,9 +188,17 @@ fast-glob   Tree-sitter   queries + per-file   cross-file   URL matching   Cytos
 * composer `files` autoloads
 * `laravel.include` globs
 
-Always skipped: `vendor/`, `storage/`, `bootstrap/cache/`, `public/`, `node_modules/`, `database/`, `config/`, `tests/`, `resources/views/`, `routes/console.php`, `routes/channels.php`, plus `.gitignore`d files and `laravel.exclude`. `bootstrap/app.php` and `RouteServiceProvider` are only read to find route registrations.
+Always skipped: `vendor/`, `storage/`, `bootstrap/cache/`, `public/`, `node_modules/`, `database/`, `config/`, `tests/`, `resources/views/`, `routes/console.php`, `routes/channels.php`, plus `.gitignore`d files and `laravel.exclude`. `bootstrap/app.php` is only read to find route registrations. Route files are read wherever they are: the app's `routes/` and any module's or package's `Routes/` / `routes/` folder (`modules/Blog/Routes/web.php`), loaded by `bootstrap/app.php` or by any service provider that registers routes.
 
-**Next.js.** Files scanned: `**/*.{js,jsx,ts,tsx,mjs,cjs}`, honouring every `.gitignore` in the tree (nested ones included). Always skipped: `node_modules`, `.next`, `out`, `build`, `dist`, `coverage`, `*.min.js`, `*.d.ts`, files with very long average line length (minified), files over 2 MB, dot-directories, and `next.exclude`. If one project is nested inside the other, each one's directory is excluded from the other's scan.
+**Next.js.** Files scanned: `**/*.{js,jsx,ts,tsx,mjs,cjs}`. Always skipped: `node_modules`, `.next`, `out`, `build`, `dist`, `coverage`, `*.min.js`, `*.d.ts`, files with very long average line length (minified), dot-directories, and `next.exclude`. In monorepo mode, a folder is a Next.js app when its `package.json` has `next` as a dependency and it has `app/`, `pages/` (or under `src/`) or a `next.config` file; libraries that only build on Next (`next` as a peer dependency, no pages) are not.
+
+**Both sides.**
+* **.gitignore:** every `.gitignore` in the project applies (nested ones included), and in a git repository also those of the folders above it, up to the repository root, as git applies them. One that ignores the analyzed folder itself doesn't apply: you asked for that folder.
+* **Symbolic links are not followed:** a link can point outside the project or loop. Links to source files are listed in a warning.
+* **Unreadable folders** (permissions, paths too long) are skipped; an unreadable source file is a warning and a parse error. Neither stops the run.
+* **Files over 2 MB** are skipped with a warning.
+* **Nested projects:** if one project is inside the other, each one's folder is excluded from the other's scan.
+* **Nothing found:** a side with no files to analyze gets a warning that names the settings to check.
 
 ## What is extracted
 
@@ -211,7 +219,7 @@ Always skipped: `vendor/`, `storage/`, `bootstrap/cache/`, `public/`, `node_modu
 | Ignored | facades and framework helpers (`DB::`, `Cache::`, `auth()`, `response()`): they resolve to external classes/functions |
 | Roles | from the path: `Http/Controllers` → controller, `Models`, `Services`, `Http/Requests`, `Http/Middleware`, `Http/Resources`, `Repositories`, `Jobs`, `Events`, `Listeners`, `Policies`, `Providers`, `routes/` → routes, else other |
 
-**Routes.** Extracted from every file under `routes/`, plus `RouteServiceProvider` and `bootstrap/app.php`:
+**Routes.** Extracted from route files (the app's `routes/`, and modules' and packages' `Routes/` folders), service providers that register routes (`->group(path)`, `require`, `$this->loadRoutesFrom(path)`) and `bootstrap/app.php`:
 * **Verbs:** `Route::get|post|put|patch|delete|options|any`, and `Route::match([...], …)`. Attribute calls may come before the verb (`Route::middleware('auth')->get(…)`).
 * **Actions:**
   * `[Controller::class, 'method']`
@@ -286,6 +294,7 @@ The output is flat and close to the brief's format, with a few extra fields:
   "meta": {
     "tool": "seammap", "version": "0.1.0",
     "backendRoot": "/abs/api", "frontendRoot": "/abs/web",
+    "frameworks": { "backend": { "id": "laravel", "name": "Laravel", "language": "PHP" }, "frontend": { "id": "next", "name": "Next.js", "language": "JS/TS" } }, // null for a side not analyzed
     "config": { "path": "../seammap.config.json", "sha256": "…" }, // or null: the config used, relative to the backend root
     "generatedAt": "…", "durationMs": 1234,
     "timings": { "scan": 0, "parse": 0, "extract": 0, "resolve": 0, "link": 0 },
@@ -342,6 +351,8 @@ Plain HTML + JavaScript ES modules (`viewer/`, no build step) using Cytoscape.js
 * **Cards.** Each card has a coloured left tab with a role icon (controller, model, service, page, component, hook, API client, …), or for endpoints an HTTP-method badge (GET green, POST blue, PUT/PATCH amber, DELETE red), and a short label: class name, route path or file name. The full path is in the tooltip and the panel.
 * **Fonts.** IBM Plex Sans for UI and labels, IBM Plex Mono for paths and routes, Space Grotesk for display text.
 * **Readable on first load.** Small graphs open at no less than 68% zoom (14px card text), centred. Large graphs, where fitting everything would leave nothing readable, open fitted to the width of the lanes, top-aligned so the group titles read, with the suggested start scrolled into view and haloed until the first click. Whatever is off-screen is one `F` (fit everything) or minimap drag away. Lane headers never clip their titles; when the lanes are narrow they move apart instead.
+* **Accessible.** Text meets WCAG AA contrast (4.5:1) in both themes, every control has a visible keyboard focus and a name, and the side panel's tabs shrink to icons (names in their tooltips) when they don't fit. Narrow windows start with the panel closed (`P` opens it).
+* **Empty and broken states.** A graph with nothing in it says what was scanned and what to check; a `graph.json` of another format version says which version wrote it (see [Versioning](#versioning)).
 * **Feedback.** Hover tooltips, toasts (isolation, copy, opening VS Code) and a one-time tip on first visit.
 
 **Layout modes.**
@@ -572,7 +583,12 @@ Releases follow semantic versioning over a defined public surface: the command l
   * Next.js `rewrites`, `basePath` and middleware proxies are not read. That is why relative calls that fall back to Laravel are uncertain.
 * **Group `namespace` ambiguity.** The base namespace from the route service provider isn't visible statically. Both readings are tried; if both exist, the relative one wins.
 * **URL building.** Helpers that assemble URLs inside other functions, URL builders (`new URL()`), query-key libraries (SWR/React Query keys), tRPC, GraphQL and WebSockets are not traced. Such calls show up as unmatched or are not detected.
-* **Partial support.** Interpolated segments are assumed to be single segments. Resource `->shallow()`, `Route::singleton` and `Route::domain` parameters are not supported.
+* **Partial support.**
+  * Interpolated segments are assumed to be single segments. Resource `->shallow()`, `Route::singleton` and `Route::domain` parameters are not supported.
+  * A route prefix that isn't a literal (`config('...')`, `env('...')`) is kept as a `{prefix}` parameter segment, with a warning.
+  * Two routes whose URIs differ only in parameter names (`/items/{id}`, `/items/{slug}`): Laravel tries them in order, so the map shows the first, with a warning; `where()` constraints that would make the first skip a request are not read.
+  * Routes are read from `Route::` calls and from `$router` / `$route` variables (route files, closures). Other names for the router (`function (Router $r)`, `app('router')`) are not followed.
+  * The TypeScript grammar (tree-sitter-typescript 0.23) misreads a few valid constructs: `&` in JSX text, generic tagged templates (`` sql<T>`...` ``), `import("x").T[]` and `typeof import("x")` as a type argument. Definitions in those files are still read, but the file is counted as a parse error.
 * **Out of scope:** Blade, Livewire, Inertia, events, queues, broadcasting, service-container bindings, Server Actions as graph entities (the security lens does read their protection), type-aware analysis, other languages and frameworks, watch mode, IDE integration, git history.
 
 ## Technical choices
@@ -628,7 +644,7 @@ Pan and zoom stay smooth because Cytoscape hides edges and uses a texture during
 ## Tests
 
 ```bash
-npm test                       # vitest: 135 tests
+npm test                       # vitest: 162 tests
 CODEMAP_PARSER=wasm npm test   # the same tests on the WebAssembly runtime the editor extension uses
 npm run typecheck
 cd extension && npm test       # the extension's integration tests in a real VS Code (after npm run build in both)
@@ -649,6 +665,8 @@ cd extension && npm test       # the extension's integration tests in a real VS 
 * `test/runtime.test.ts`, `test/runtime-abort.test.ts`: which parser runtime ran, and a runtime that runs out of memory stops the analysis instead of skipping the rest of the project.
 * `test/extension-manifest.test.ts`: `extension/package.json` is generated from `package.json`, so every extension identifier derives from the CLI's command name.
 * `extension/test/suite.cjs` (in VS Code): opening the map, opening a file at the right line beside it, the active-file highlight and **Show Current File on Map**, the security lens setting, out of date and refresh, following the editor theme, the format-version check, Restricted Mode ignoring the config's `security` section, and no network use (each analysis runs with networking disabled). `CODEMAP_PERF_WORKSPACE=<folder>` times a large project instead.
+* `test/robustness.test.ts`: inputs real projects contain that once broke a run or gave a wrong map: symbolic links (loops, links out of the project), unreadable folders, `.gitignore` files above the project, nested projects with special folder names, an empty side; module route files and `loadRoutesFrom`, non-literal prefixes, routes that differ only in parameter names, a `require` in `bootstrap/app.php`; aliases into a monorepo's packages, Next.js apps vs libraries, `proxy.ts`; config files that aren't objects, unknown keys, include patterns outside the project.
+* `test/frameworks.test.ts`: the contract every registered framework keeps on its fixture: detection, `meta.frameworks`, id prefixes, relative paths, its own endpoints, determinism (docs/ARCHITECTURE.md).
 * `test/config-lookup.test.ts`: which config file belongs to the projects (repository root, not above it, closest, the one naming the projects, backend on a tie, the folder holding both outside a repository), and `meta.config` (relative path, a hash that ignores comments, key order, line endings and byte-order marks).
 * `test/classify-first.test.ts`: the first step names the few middleware that keep most unknowns unknown, classifying them resolves exactly the endpoints it counts, it never changes a state itself, and it stays empty when no small set settles a majority.
 * `test/versioning.test.ts`: the version in `package.json` is the one the API, the CLI and `graph.json` report; `graph.json` starts with `schemaVersion`; `checkSchema()` accepts the current format and explains newer, older, missing and invalid ones; the changelog check that guards `npm version` and `npm publish`.
@@ -683,15 +701,19 @@ src/
   index.ts          programmatic API (the package entry)
   schema.ts         graph.json format version and checkSchema(), shared with the viewer (served as /schema.js)
   wasm-runtime.ts   the WebAssembly parser runtime (web-tree-sitter) for setParserRuntime(), used by the extension
-  detect.ts         Laravel/Next.js detection, composer.json, tsconfig paths
-  scan.ts           fast-glob + ignore (.gitignore aware)
+  framework.ts      the Framework interface: what the pipeline needs to know about a framework (docs/ARCHITECTURE.md)
+  frameworks.ts     the registry of supported frameworks (Laravel, Next.js)
+  detect.ts         project detection (monorepo mode) and root checks, through the registry
+  scan.ts           file walking: .gitignore files, skips, no symbolic links, unreadable folders skipped
   parse.ts          Tree-sitter parsers and query loader
   adapter.ts        language adapter interface
   graph.ts          node/edge store, merging, deterministic output
   link.ts           HTTP call ↔ endpoint linking, unmatched nodes
   match/            URL normalization (url.ts) and matching (match.ts)
-  lang/php/         names.ts, extract.ts, routes.ts, index.ts (LaravelAdapter), queries/*.scm
-  lang/js/          extract.ts, resolve.ts (modules), next.ts (conventions), index.ts (NextAdapter), queries/*.scm
+  lang/php/         framework.ts (Laravel), index.ts (LaravelAdapter), composer.ts, scan.ts, names.ts, extract.ts,
+                    routes.ts, queries/*.scm
+  lang/js/          framework.ts (Next.js), index.ts (NextAdapter), tsconfig.ts, scan.ts, extract.ts,
+                    resolve.ts (modules), next.ts (conventions), queries/*.scm
   security/         opt-in lens: catalog.ts (known middleware), registry.ts (Kernel/bootstrap/providers),
                     resolver.ts (names -> classes -> effect), controller.ts, code.ts (handler checks),
                     laravel.ts (per endpoint), sarif.ts (import + path matching), findings.ts (placement,
@@ -710,7 +732,8 @@ scripts/            copy-assets.mjs (.scm queries into dist/), vendor-native.mjs
                     check-release.mjs (changelog check for npm version/publish), rename.mjs, build-linux-binding.sh,
                     extension-manifest.mjs (extension/package.json from package.json), build-extension.mjs
 native-prebuilds/   rebuilt parser binaries that replace broken upstream ones (see its README)
-docs/               PUBLISHING.md (owner's release checklist and versioning policy), screenshots
+docs/               ARCHITECTURE.md (the pipeline, and adding a framework), PUBLISHING.md (owner's release checklist and
+                    versioning policy), screenshots
 CHANGELOG.md        changes per release, including "Results may differ"
 ```
 

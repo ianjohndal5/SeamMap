@@ -16,7 +16,7 @@
         <rect x="16.5" y="4" width="6" height="16" rx="2" fill="var(--next)"/>
       </svg>
       <div class="brand-text">
-        <span class="brand-name">SeamMap</span>
+        <h1 class="brand-name">SeamMap</h1>
         <span class="brand-sub" id="project-chip"></span>
       </div>
     </div>
@@ -71,16 +71,17 @@
       </div>
       <div class="loading" id="loading" hidden><span class="spinner"></span><span id="loading-text">Laying out…</span></div>
       <div class="load-problem" id="load-problem" role="alert" hidden><h2>This graph.json can't be shown</h2><p id="load-problem-text"></p></div>
+      <div class="load-problem" id="nothing-found" hidden><h2>Nothing to map</h2><p>The analysis found no definitions or routes. The panel says what was scanned and what to check.</p></div>
       <div class="tooltip" id="tooltip" hidden></div>
       <div class="toasts" id="toasts"></div>
     </section>
 
     <aside class="panel" id="panel">
       <nav class="tabs" role="tablist">
-        <button role="tab" data-tab="inspect" aria-selected="true"><i data-icon="target"></i>Inspect</button>
-        <button role="tab" data-tab="insights" aria-selected="false"><i data-icon="sparkle"></i>Insights<span class="tab-badge" id="insights-badge" hidden></span></button>
-        <button role="tab" data-tab="security" aria-selected="false" hidden><i data-icon="shield"></i>Security<span class="tab-badge muted" id="security-badge" hidden></span></button>
-        <button role="tab" data-tab="filters" aria-selected="false"><i data-icon="layout"></i>Filters<span class="tab-badge muted" id="filters-badge" hidden></span></button>
+        <button role="tab" data-tab="inspect" aria-selected="true" title="Inspect"><i data-icon="target"></i><span class="tab-label">Inspect</span></button>
+        <button role="tab" data-tab="insights" aria-selected="false" title="Insights"><i data-icon="sparkle"></i><span class="tab-label">Insights</span><span class="tab-badge" id="insights-badge" hidden></span></button>
+        <button role="tab" data-tab="security" aria-selected="false" title="Security" hidden><i data-icon="shield"></i><span class="tab-label">Security</span><span class="tab-badge muted" id="security-badge" hidden></span></button>
+        <button role="tab" data-tab="filters" aria-selected="false" title="Filters"><i data-icon="layout"></i><span class="tab-label">Filters</span><span class="tab-badge muted" id="filters-badge" hidden></span></button>
       </nav>
       <div class="panel-body" id="panel-body"></div>
     </aside>

@@ -96,7 +96,7 @@ export function methodTab(text, color, h, dashed = false) {
   const key = `m|${text}|${color}|${h}|${dashed}`;
   let u = cache.get(key);
   if (!u) {
-    const size = text.length > 5 ? 10 : 11.5;
+    const size = text.length > 5 ? 11 : 12.5;
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${BADGE_W}" height="${h}" viewBox="0 0 ${BADGE_W} ${h}">` +
       `<rect width="${BADGE_W}" height="${h}" fill="${hexToRgba(color, dashed ? 0.08 : 0.15)}"/>` +

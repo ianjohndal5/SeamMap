@@ -10,7 +10,7 @@ import { esc, methodPill, renderFilters, renderInsights, renderInspectEdge, rend
 import { computeRoutes, routeStyle } from './route.js';
 import { checkSchema } from './schema.js'; // served from dist/schema.js (src/schema.ts), shared with the API
 import { editorTheme, graphUrl, inWebview, onEditorTheme, onHostMessage, openLink, postToHost, store, testMode } from './host.js';
-import { BAND, GROUPS, GROUP_ORDER, LANES, THEMES, laneOf, methodBadge, methodColor } from './theme.js';
+import { BAND, GROUPS, GROUP_ORDER, LANES, THEMES, isOwnHandler, laneOf, methodBadge, methodColor, setFrameworks } from './theme.js';
 
 // Below these sizes the real cards are laid out with ELK layered ("flow"); above
 // them ELK lays out role groups and cards are packed inside each group.
@@ -174,6 +174,7 @@ class App {
       badge.hidden = !(none + unknown);
       badge.title = `${none} no protection found · ${unknown} unknown${a ? ' (endpoints and server actions)' : ''}`;
     }
+    this.fitTabs();
   }
 
   /** Findings on this node, or inside it when it is shown collapsed. */
@@ -238,6 +239,19 @@ class App {
     const fb = $('#filters-badge');
     fb.hidden = !hidden;
     fb.textContent = hidden;
+    this.fitTabs();
+  }
+
+  /** When the tabs don't fit the panel, the ones that aren't selected show their icon only (their title says the name). */
+  fitTabs() {
+    const tabs = $('.tabs');
+    if (!tabs.clientWidth) return; // panel collapsed: measured when it opens
+    tabs.classList.remove('compact');
+    const cs = getComputedStyle(tabs);
+    const room = tabs.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const shown = [...tabs.children].filter((b) => !b.hidden);
+    const need = shown.reduce((w, b) => w + b.getBoundingClientRect().width, 0) + parseFloat(cs.columnGap || '0') * (shown.length - 1);
+    tabs.classList.toggle('compact', need > room + 0.5);
   }
 
   updateThemeButton() {
@@ -325,7 +339,7 @@ class App {
       const g = groupKey(top);
       const [w, h, tab] = sizeOf(n);
       const classes = [n.kind === 'file' ? 'file' : n.kind === 'endpoint' || n.kind === 'unmatched' ? n.kind : 'def'];
-      if (n.kind === 'endpoint' && n.server === 'laravel' && this.meta.frontendRoot && !M.called.has(n.id)) classes.push('uncalled');
+      if (n.kind === 'endpoint' && !isOwnHandler(n) && this.meta.frontendRoot && !M.called.has(n.id)) classes.push('uncalled');
       if (state.secLens && this.sec?.has(id)) classes.push('sec-' + this.sec.get(id).state);
       if (state.secLens && this.hasFindingMark(id)) classes.push('has-finding');
       if (n.parseError) classes.push('parse-error');
@@ -1092,6 +1106,7 @@ class App {
   setTab(tab, render = true) {
     this.state.tab = tab;
     for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    this.fitTabs();
     if (render) this.renderPanel();
   }
 
@@ -1254,6 +1269,7 @@ class App {
       this.cy.resize();
       this.minimap.refresh();
       this.updateOverlays();
+      this.fitTabs();
     }, 220);
   }
 
@@ -1480,7 +1496,10 @@ class App {
       else if ((k === 's' || k === 'S') && this.sec) this.setSecLens(!this.state.secLens);
       else if (k === '?') $('#help-dialog').showModal();
     });
-    window.addEventListener('resize', () => this.minimap.refresh());
+    window.addEventListener('resize', () => {
+      this.minimap.refresh();
+      this.fitTabs();
+    });
   }
 }
 
@@ -1502,7 +1521,9 @@ async function main() {
   const themeName = editorTheme() ?? (saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   if (inWebview) $('#btn-theme').hidden = true;
   document.documentElement.dataset.theme = themeName;
-  if (store.get('seammap.panel') === 'collapsed') document.body.classList.add('panel-collapsed');
+  // Below 820px the panel overlays the map: start with it closed unless it was opened before.
+  const panelPref = store.get('seammap.panel');
+  if (panelPref === 'collapsed' || (!panelPref && matchMedia('(max-width: 820px)').matches)) document.body.classList.add('panel-collapsed');
   // Canvas labels need the web fonts before the first draw (Cytoscape caches label bitmaps).
   const fonts = ['500 13px "IBM Plex Sans"', '400 12px "IBM Plex Sans"', '500 12px "IBM Plex Mono"', '700 16px "Space Grotesk"'].map((f) => document.fonts.load(f));
   await Promise.race([Promise.all(fonts), new Promise((r) => setTimeout(r, 2500))]);
@@ -1524,12 +1545,14 @@ async function main() {
     postToHost({ type: 'schemaProblem', kind: problem.kind, message: problem.message });
     return;
   }
+  setFrameworks(graph.meta.frameworks);
   const app = new App(graph, themeName);
   window.seammap = app;
   onHostMessage((msg) => app.onHostMessage(msg));
   onEditorTheme((name) => app.applyTheme(name, false));
   await app.render();
-  app.onboarding();
+  if (!graph.nodes.length) $('#nothing-found').hidden = false;
+  else app.onboarding();
   postToHost({ type: 'ready', cards: app.cy.nodes().not('.lane, .group').length });
   // When the first frame of the map has been drawn (the extension's timing tests compare the two).
   const readyAt = performance.now();

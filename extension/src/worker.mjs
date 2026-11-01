@@ -49,8 +49,9 @@ async function main(req) {
     if (req.frontend) starts.push({ dir: req.frontend, label: 'frontend root', role: 'frontend' });
     starts.push({ dir: req.folder, label: 'workspace folder' });
     const lookup = req.configFile ? { file: req.configFile, how: 'set in the configFile setting', searched: [], others: [] } : findConfig(starts);
-    const { config } = lookup.file ? loadConfig(lookup.file, req.folder) : { config: defaultConfig() };
-    const warnings = lookup.others.map((f) => `Also found ${f}, not used (${lookup.file} was chosen: ${lookup.how}).`);
+    const loaded = lookup.file ? loadConfig(lookup.file, req.folder) : { config: defaultConfig(), warnings: [] };
+    const config = loaded.config;
+    const warnings = [...loaded.warnings, ...lookup.others.map((f) => `Also found ${f}, not used (${lookup.file} was chosen: ${lookup.how}).`)];
     // Restricted Mode: an untrusted config must not be able to make routes look protected.
     let ignoredSecurity = false;
     if (req.untrusted && lookup.file) {

@@ -1,6 +1,8 @@
 import type { GraphBuilder } from './graph.js';
 import { matchCall, type PatternedEndpoint } from './match/match.js';
-import { laravelPattern, nextPattern, normalizeCallUrl, type NormalizeOptions } from './match/url.js';
+import type { Framework } from './framework.js';
+import { frameworkById } from './frameworks.js';
+import { normalizeCallUrl, type NormalizeOptions } from './match/url.js';
 import type { Endpoint, HttpCall, UnmatchedHttpCall } from './types.js';
 
 export interface LinkResult {
@@ -12,23 +14,29 @@ export interface LinkResult {
 const DYNAMIC_ID = 'unmatched:dynamic';
 
 /**
- * Link stage: normalize every frontend HTTP call, match it against Laravel and
- * Next.js endpoints, and emit `http` edges. Calls that match nothing point at an
- * "unmatched" pseudo-endpoint so they stay visible in the middle column.
+ * The framework analyzed on each side, or null. Without a backend nothing can match it, without a frontend nothing
+ * calls the endpoints.
  */
-/** Which sides were analyzed: without a backend nothing can match it, without a frontend nothing calls the endpoints. */
 export interface Sides {
-  backend: boolean;
-  frontend: boolean;
+  backend: Framework | null;
+  frontend: Framework | null;
 }
 
-export function link(graph: GraphBuilder, calls: HttpCall[], endpoints: Endpoint[], opts: NormalizeOptions, sides: Sides = { backend: true, frontend: true }): LinkResult {
-  const laravel: PatternedEndpoint[] = [];
-  const next: PatternedEndpoint[] = [];
+/**
+ * Link stage: normalize every frontend HTTP call, match it against the endpoints (the backend's routes, and the
+ * frontend's own route handlers), and emit `http` edges. Calls that match nothing point at an "unmatched"
+ * pseudo-endpoint so they stay visible in the middle column.
+ */
+export function link(graph: GraphBuilder, calls: HttpCall[], endpoints: Endpoint[], opts: NormalizeOptions, sides: Sides): LinkResult {
+  const backend: PatternedEndpoint[] = [];
+  const own: PatternedEndpoint[] = [];
   for (const ep of endpoints) {
-    if (ep.server === 'laravel') laravel.push({ ...ep, segs: laravelPattern(ep.path) });
-    else next.push({ ...ep, segs: nextPattern(ep.path) });
+    const framework = frameworkById(ep.server);
+    if (!framework) throw new Error(`endpoint ${ep.id}: unknown framework "${ep.server}"`);
+    (framework.side === 'backend' ? backend : own).push({ ...ep, segs: framework.endpointPattern(ep.path) });
   }
+  const backendRoutes = sides.backend ? `${sides.backend.name} route` : null;
+  const ownRoutes = `${sides.frontend?.name ?? 'frontend'} route handler`;
   const called = new Set<string>();
   const unmatchedCalls: UnmatchedHttpCall[] = [];
   let matchedCalls = 0;
@@ -48,7 +56,7 @@ export function link(graph: GraphBuilder, calls: HttpCall[], endpoints: Endpoint
   for (const call of sorted) {
     const method = call.method ?? '?';
     const norm = normalizeCallUrl(call.url, opts);
-    const found = norm ? matchCall(norm, call.method, laravel, next) : null;
+    const found = norm ? matchCall(norm, call.method, backend, own) : null;
     const result = found?.ambiguous ? null : found;
     if (result) {
       matchedCalls++;
@@ -69,13 +77,13 @@ export function link(graph: GraphBuilder, calls: HttpCall[], endpoints: Endpoint
       reason = found?.ambiguous
         ? `ambiguous: ${found.endpoints.length} endpoints match`
         : norm.target === 'backend'
-          ? sides.backend
-            ? 'no Laravel route matches'
+          ? backendRoutes
+            ? `no ${backendRoutes} matches`
             : 'calls the backend, which was not analyzed (no --backend)'
           : norm.target === 'relative'
-            ? sides.backend
-              ? 'no Next.js route handler or Laravel route matches'
-              : 'no Next.js route handler matches (no backend was analyzed)'
+            ? backendRoutes
+              ? `no ${ownRoutes} or ${backendRoutes} matches`
+              : `no ${ownRoutes} matches (no backend was analyzed)`
             : norm.target === 'external'
               ? 'external URL'
               : 'unknown base URL and no suffix match';

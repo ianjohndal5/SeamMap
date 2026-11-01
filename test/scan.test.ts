@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { defaultConfig } from '../src/config.js';
-import { scanLaravel, scanNext } from '../src/scan.js';
+import { scanNext } from '../src/lang/js/scan.js';
+import { scanLaravel } from '../src/lang/php/scan.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'seammap-scan-'));
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));

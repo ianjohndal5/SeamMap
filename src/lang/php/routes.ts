@@ -218,7 +218,8 @@ export class LaravelRouteExtractor {
       if (target) out.push(target);
     }
     for (const n of root.descendantsOfType('member_call_expression')) {
-      if (n.childForFieldName('name')?.text !== 'group') continue;
+      const name = n.childForFieldName('name')?.text;
+      if (name !== 'group' && name !== 'loadRoutesFrom') continue;
       for (const a of argsOf(n)) {
         const target = resolveFileExpr(rel, a);
         if (target) out.push(target);
@@ -264,7 +265,8 @@ export class LaravelRouteExtractor {
     this.included.add(target);
     const root = this.source.trees.get(target);
     if (!root) {
-      this.issues.push({ file: fromRel, line: line(at), reason: 'included route file not found or not scanned', text: target });
+      // bootstrap/app.php and providers require other files too (scheduled tasks, helpers): only route files count.
+      if (isRouteFile(target)) this.issues.push({ file: fromRel, line: line(at), reason: 'included route file not found or not scanned', text: target });
       return;
     }
     if (stack.includes(target)) return;
@@ -282,6 +284,12 @@ export class LaravelRouteExtractor {
             if (target) this.include(rel, target, ctx, stack, expr);
             break;
           }
+          // $this->loadRoutesFrom(__DIR__.'/../routes/web.php') in a service provider: no prefix, no middleware.
+          if (expr.type === 'member_call_expression' && expr.childForFieldName('name')?.text === 'loadRoutesFrom' && expr.childForFieldName('object')?.text === '$this') {
+            const target = resolveFileExpr(rel, argsOf(expr)[0]);
+            if (target) this.include(rel, target, ctx, stack, expr);
+            break;
+          }
           const chain = flattenRouteChain(expr, this.scopeFor(rel));
           if (chain) this.handleChain(rel, chain, ctx, stack);
           else this.walk(rel, child, ctx, stack);
@@ -296,6 +304,15 @@ export class LaravelRouteExtractor {
     }
   }
 
+  /**
+   * A prefix that isn't a literal (config('...'), env('...')): its routes keep a segment for it, as a parameter
+   * named {prefix} (it matches whatever the value is), and the run says so.
+   */
+  private unknownPrefix(ctx: RouteCtx, rel: string, node: SyntaxNode): RouteCtx {
+    this.issue(rel, node, 'non-literal route prefix; its routes show it as {prefix}');
+    return { ...ctx, prefix: joinUri(ctx.prefix, '{prefix}') };
+  }
+
   private applyAttribute(ctx: RouteCtx, call: ChainCall, scope: PhpScope, rel = '', via: MiddlewareUse['via'] = 'group'): RouteCtx {
     switch (call.nameLower) {
       case 'middleware':
@@ -304,7 +321,8 @@ export class LaravelRouteExtractor {
         return { ...ctx, excluded: [...ctx.excluded, ...this.mw(call.args, scope, rel, call.node, via)] };
       case 'prefix': {
         const p = phpString(call.args[0]);
-        return p === null ? ctx : { ...ctx, prefix: joinUri(ctx.prefix, p) };
+        if (p !== null) return { ...ctx, prefix: joinUri(ctx.prefix, p) };
+        return call.args[0] ? this.unknownPrefix(ctx, rel, call.args[0]) : ctx;
       }
       case 'controller': {
         const constant = classConstant(call.args[0], scope);
@@ -352,8 +370,10 @@ export class LaravelRouteExtractor {
     if (head.nameLower === 'group') {
       let gctx = local;
       const attrs = arrayAttributes(head.args.length > 1 ? head.args[0] : undefined);
-      const prefix = phpString(attrs.get('prefix'));
+      const prefixNode = attrs.get('prefix');
+      const prefix = phpString(prefixNode);
       if (prefix !== null) gctx = { ...gctx, prefix: joinUri(gctx.prefix, prefix) };
+      else if (prefixNode) gctx = this.unknownPrefix(gctx, rel, prefixNode);
       const ns = phpString(attrs.get('namespace'));
       if (ns !== null) gctx = { ...gctx, namespaces: nestNamespace(gctx.namespaces, ns) };
       const ctrl = attrs.get('controller');
@@ -624,10 +644,18 @@ export function extractRoutes(
   const extractor = new LaravelRouteExtractor({ trees }, opts.controllerNamespace);
   const referenced = new Set<string>();
   for (const [rel, root] of trees) for (const r of LaravelRouteExtractor.referencedFiles(rel, root)) referenced.add(r);
-  const registrars = [...trees.keys()].filter((r) => !r.startsWith('routes/')).sort();
-  for (const rel of registrars) extractor.processFile(rel, '');
+  const guarded = (rel: string, run: () => void) => {
+    try {
+      run();
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      extractor.issues.push({ file: rel, line: 1, reason: 'route file nests too deeply to read; its routes may be missing', text: rel });
+    }
+  };
+  const registrars = [...trees.keys()].filter((r) => !isRouteFile(r)).sort();
+  for (const rel of registrars) guarded(rel, () => extractor.processFile(rel, ''));
   const loaders = routingLoaders(trees.get('bootstrap/app.php'));
-  const entries = [...trees.keys()].filter((r) => r.startsWith('routes/') && !referenced.has(r)).sort();
+  const entries = [...trees.keys()].filter((r) => isRouteFile(r) && !referenced.has(r)).sort();
   for (const rel of entries) {
     const seen = loaders.get(rel);
     const conventional = rel === 'routes/web.php' ? 'web' : rel === 'routes/api.php' ? 'api' : null;
@@ -636,9 +664,14 @@ export function extractRoutes(
       : conventional
         ? { middleware: [{ name: conventional, text: conventional, file: rel, line: 1, via: 'loader' as const }], state: 'convention' as const }
         : { middleware: [], state: 'unknown' as const };
-    extractor.processFile(rel, rel === 'routes/api.php' ? opts.apiPrefix : '', [], loader);
+    guarded(rel, () => extractor.processFile(rel, rel === 'routes/api.php' ? opts.apiPrefix : '', [], loader));
   }
   return extractor;
+}
+
+/** A route file: in the app's routes/ folder, or a module's or package's Routes/ folder (modules/Blog/Routes/web.php). */
+export function isRouteFile(rel: string): boolean {
+  return /(^|\/)routes\//i.test(rel);
 }
 
 /** Laravel 11+ `->withRouting(web: __DIR__.'/../routes/web.php', api: ...)`: each file gets its middleware group. */

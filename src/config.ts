@@ -200,12 +200,65 @@ function canonical(value: unknown): string {
  * `cwd` is used when present (the CLI picks the file with findConfig instead). Relative paths inside it resolve
  * against the config file's directory.
  */
-export function loadConfig(explicit: string | undefined, cwd: string): { config: CodemapConfig; file: string | null } {
+/** The keys each part of the config file knows; anything else is a typo or from a newer version (a warning). */
+const KNOWN_KEYS: Record<string, string[]> = {
+  '': ['backend', 'frontend', 'laravel', 'next', 'security', '$schema'],
+  laravel: ['apiPrefix', 'include', 'exclude', 'controllerNamespace'],
+  next: ['include', 'exclude', 'backendEnvVars', 'baseUrlVariables', 'backendHosts', 'backendBasePath'],
+  security: ['authMiddleware', 'authorizationMiddleware', 'publicMiddleware', 'ignoreMiddleware', 'sarif', 'checks', 'disableChecks'],
+};
+
+/** Edit distance, for "did you mean" suggestions. */
+function distance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0]!;
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cur = row[j]!;
+      row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1]!.toLowerCase() === b[j - 1]!.toLowerCase() ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return row[b.length]!;
+}
+
+/** Warnings for keys of `obj` (a part of the config: '' for the top level) that SeamMap doesn't know. */
+function unknownKeys(obj: Record<string, unknown>, part: string, file: string): string[] {
+  const known = KNOWN_KEYS[part]!;
+  return Object.keys(obj)
+    .filter((k) => !known.includes(k))
+    .map((k) => {
+      const near = known.filter((n) => distance(k, n) <= 2).sort((a, b) => distance(k, a) - distance(k, b))[0];
+      return `${path.basename(file)}: unknown key "${part ? `${part}.` : ''}${k}" is ignored${near ? ` (did you mean "${part ? `${part}.` : ''}${near}"?)` : ''}`;
+    });
+}
+
+/** A section of the config file: an object, or absent. */
+function sectionOf(raw: Record<string, unknown>, key: string): Record<string, unknown> {
+  const v = raw[key];
+  if (v === undefined) return {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`config: "${key}" must be an object`);
+  return v as Record<string, unknown>;
+}
+
+/** include globs: relative to the project root and inside it (they can't reach other folders). */
+function insidePatterns(v: string[], what: string): string[] {
+  const outside = v.find((p) => path.isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.split(/[\\/]/).includes('..'));
+  if (outside !== undefined) throw new Error(`config: "${what}" patterns are relative to the project root and must stay inside it (got "${outside}")`);
+  return v;
+}
+
+/**
+ * Read a config file (`explicit`, relative to `cwd`, else ./seammap.config.json). `warnings` lists what was ignored
+ * (unknown keys); invalid values throw, with the file and the key in the message.
+ */
+export function loadConfig(explicit: string | undefined, cwd: string): { config: CodemapConfig; file: string | null; warnings: string[] } {
   const config = defaultConfig();
   const file = explicit ? path.resolve(cwd, explicit) : path.join(cwd, CONFIG_FILE);
   if (!fs.existsSync(file)) {
     if (explicit) throw new Error(`Config file not found: ${file}`);
-    return { config, file: null };
+    return { config, file: null, warnings: [] };
   }
   let raw: Record<string, unknown>;
   try {
@@ -213,6 +266,16 @@ export function loadConfig(explicit: string | undefined, cwd: string): { config:
   } catch (e) {
     throw new Error(`Could not parse ${file}: ${(e as Error).message}`);
   }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${file}: the config must be a JSON object ({ ... })`);
+  try {
+    return readConfig(raw, file, config);
+  } catch (e) {
+    throw new Error(`${file}: ${(e as Error).message.replace(/^config: /, '')}`);
+  }
+}
+
+function readConfig(raw: Record<string, unknown>, file: string, config: CodemapConfig): { config: CodemapConfig; file: string; warnings: string[] } {
+  const warnings = unknownKeys(raw, '', file);
   // The parsed settings, not the bytes: comments, formatting, key order and line endings don't change it.
   config.source = { file, sha256: createHash('sha256').update(canonical(raw)).digest('hex') };
   const dir = path.dirname(file);
@@ -221,23 +284,24 @@ export function loadConfig(explicit: string | undefined, cwd: string): { config:
   if (backend) config.backend = path.resolve(dir, backend);
   if (frontend) config.frontend = path.resolve(dir, frontend);
 
-  const lv = (raw.laravel ?? {}) as Record<string, unknown>;
+  const lv = sectionOf(raw, 'laravel');
   config.laravel = {
     apiPrefix: optString(lv.apiPrefix, 'laravel.apiPrefix'),
-    include: strArray(lv.include, 'laravel.include'),
+    include: insidePatterns(strArray(lv.include, 'laravel.include'), 'laravel.include'),
     exclude: strArray(lv.exclude, 'laravel.exclude'),
     controllerNamespace: optString(lv.controllerNamespace, 'laravel.controllerNamespace'),
   };
-  const nx = (raw.next ?? {}) as Record<string, unknown>;
+  const nx = sectionOf(raw, 'next');
   config.next = {
-    include: strArray(nx.include, 'next.include'),
+    include: insidePatterns(strArray(nx.include, 'next.include'), 'next.include'),
     exclude: strArray(nx.exclude, 'next.exclude'),
     backendEnvVars: strArray(nx.backendEnvVars, 'next.backendEnvVars'),
     baseUrlVariables: strArray(nx.baseUrlVariables, 'next.baseUrlVariables'),
     backendHosts: strArray(nx.backendHosts, 'next.backendHosts'),
     backendBasePath: basePathOption(nx.backendBasePath),
   };
-  const sec = (raw.security ?? {}) as Record<string, unknown>;
+  const sec = sectionOf(raw, 'security');
+  warnings.push(...unknownKeys(lv, 'laravel', file), ...unknownKeys(nx, 'next', file), ...unknownKeys(sec, 'security', file));
   config.security = {
     authMiddleware: strArray(sec.authMiddleware, 'security.authMiddleware'),
     authorizationMiddleware: strArray(sec.authorizationMiddleware, 'security.authorizationMiddleware'),
@@ -247,5 +311,5 @@ export function loadConfig(explicit: string | undefined, cwd: string): { config:
     checks: optBool(sec.checks, 'security.checks') ?? true,
     disableChecks: strArray(sec.disableChecks, 'security.disableChecks'),
   };
-  return { config, file };
+  return { config, file, warnings };
 }

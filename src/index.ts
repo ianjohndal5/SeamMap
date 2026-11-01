@@ -31,5 +31,5 @@ export type { SchemaProblem } from './schema.js';
 export { defaultConfig, findConfig, loadConfig } from './config.js';
 export type { CodemapConfig, ConfigLookup, ConfigStart, LaravelOptions, NextOptions, SecurityOptions } from './config.js';
 export { findProjects, resolveRoots } from './detect.js';
-export type { Diagnostic, EdgeKind, Graph, GraphEdge, GraphNode, NodeKind, Side, Stats, Timings, UnmatchedHttpCall } from './types.js';
+export type { Diagnostic, EdgeKind, FrameworkId, FrameworkInfo, Graph, GraphEdge, GraphNode, NodeKind, Side, Stats, Timings, UnmatchedHttpCall } from './types.js';
 export type * from './security/types.js';

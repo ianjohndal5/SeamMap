@@ -26,7 +26,7 @@ export function nextFileInfo(rel: string): NextFileInfo {
   const stripped = rel.replace(/^src\//, '');
   const base = stripped.replace(PAGE_EXT, '');
 
-  if (base === 'middleware' || base === 'instrumentation') return { nextKind: base };
+  if (base === 'middleware' || base === 'proxy' || base === 'instrumentation') return { nextKind: base };
 
   if (stripped.startsWith('app/')) {
     const parts = base.split('/').slice(1);

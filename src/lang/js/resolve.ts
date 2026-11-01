@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { TsPaths } from '../../detect.js';
+import type { TsPaths } from './tsconfig.js';
 import { dirnamePosix, joinPosix, normalizeRel } from '../../util/paths.js';
 
 export type Resolution =
@@ -78,7 +78,8 @@ export class ModuleResolver {
         const hit = target === null ? null : this.tryFile(target);
         if (hit) return { kind: 'file', rel: hit };
       }
-      return isAsset ? { kind: 'asset' } : first === null ? { kind: 'unresolved' } : this.miss(first);
+      // An alias into a folder outside the project (a monorepo's packages/): outside the analysis, like a package.
+      return isAsset ? { kind: 'asset' } : first === null ? { kind: 'external' } : this.miss(first);
     }
     if (this.ts.hasBaseUrl) {
       const target = normalizeRel(joinPosix(this.ts.baseDir, spec));
